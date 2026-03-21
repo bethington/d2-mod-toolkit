@@ -5,6 +5,7 @@
 #include "AutoPickup.h"
 #include "HookManager.h"
 #include "CrashCatcher.h"
+#include "PatchManager.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -805,7 +806,51 @@ namespace {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Patches")) {
-                ImGui::Text("Patch manager will appear here.");
+                ImVec4 cGold3(0.85f, 0.72f, 0.45f, 1.0f);
+                ImVec4 cGreen3(0.4f, 1.0f, 0.4f, 1.0f);
+                ImVec4 cRed3(1.0f, 0.4f, 0.4f, 1.0f);
+                ImVec4 cGray3(0.6f, 0.6f, 0.6f, 1.0f);
+
+                auto patches = PatchManager::ListPatches();
+                ImGui::TextColored(cGold3, "Patches: %d", (int)patches.size());
+
+                if (!patches.empty()) {
+                    if (ImGui::BeginTable("PatchTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 40 * g_dpiScale);
+                        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
+                        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (auto& p : patches) {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%s", p.name.c_str());
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::BeginTooltip();
+                                ImGui::Text("Source: %s", p.source.c_str());
+                                ImGui::Text("Original: %s", p.originalHex.c_str());
+                                ImGui::Text("Patched:  %s", p.patchedHex.c_str());
+                                ImGui::EndTooltip();
+                            }
+                            ImGui::TableNextColumn();
+                            ImGui::Text("0x%08X", p.address);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%d", p.size);
+                            ImGui::TableNextColumn();
+                            ImGui::TextColored(p.active ? cGreen3 : cRed3, p.active ? "ON" : "OFF");
+                            ImGui::TableNextColumn();
+                            char btnId[64]; snprintf(btnId, sizeof(btnId), "Toggle##%s", p.name.c_str());
+                            if (ImGui::SmallButton(btnId)) {
+                                PatchManager::TogglePatch(p.name);
+                            }
+                        }
+                        ImGui::EndTable();
+                    }
+                } else {
+                    ImGui::TextColored(cGray3, "No patches applied. Use MCP apply_patch or import_patches.");
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Rendering")) {

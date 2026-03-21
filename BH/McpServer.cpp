@@ -10,6 +10,7 @@
 #include "HookManager.h"
 #include "GameNav.h"
 #include "CrashCatcher.h"
+#include "PatchManager.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -24,6 +25,8 @@
 #include <queue>
 #include <map>
 #include <functional>
+#include <fstream>
+#include <psapi.h>
 
 // cpp-httplib — single header HTTP server
 #include "../ThirdParty/httplib.h"
@@ -331,6 +334,62 @@ namespace {
                 {"type", "object"},
                 {"properties", {
                     {"clear", {{"type", "boolean"}, {"description", "Clear log after reading"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "list_patches"},
+            {"description", "List all managed patches with addresses, status, and original/patched bytes."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "apply_patch"},
+            {"description", "Apply a named binary patch at an address. Stores original bytes for undo."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Unique name for this patch"}}},
+                    {"address", {{"type", "string"}, {"description", "Hex address (e.g., '0x6FAB1234')"}}},
+                    {"bytes", {{"type", "string"}, {"description", "Hex bytes to write (e.g., '90 90 90')"}}}
+                }},
+                {"required", {"name", "address", "bytes"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "toggle_patch"},
+            {"description", "Toggle a patch on/off (apply/revert)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Patch name to toggle"}}}
+                }},
+                {"required", {"name"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "import_patches"},
+            {"description", "Import patches from a JSON array. Format: [{\"name\":\"...\", \"address\":\"0x...\", \"bytes\":\"90 90\"}]"},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"patches", {{"type", "string"}, {"description", "JSON array string of patch definitions"}}}
+                }},
+                {"required", {"patches"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "export_patches"},
+            {"description", "Export all managed patches as a JSON file that can be used to permanently patch DLL files on disk."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"file", {{"type", "string"}, {"description", "Output file path (default: patches_export.json in game dir)"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -1005,6 +1064,128 @@ namespace {
             }
 
             json info = {{"count", entries.size()}, {"crashes", entries}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "list_patches") {
+            auto patches = PatchManager::ListPatches();
+            json list = json::array();
+            for (auto& p : patches) {
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", p.address);
+                list.push_back({
+                    {"name", p.name},
+                    {"source", p.source},
+                    {"address", addrBuf},
+                    {"size", p.size},
+                    {"active", p.active},
+                    {"original", p.originalHex},
+                    {"patched", p.patchedHex}
+                });
+            }
+            json info = {{"count", list.size()}, {"patches", list}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "apply_patch") {
+            std::string patchName = arguments.value("name", "");
+            std::string addrStr = arguments.value("address", "");
+            std::string bytesStr = arguments.value("bytes", "");
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+
+            // Parse hex bytes
+            std::vector<BYTE> bytes;
+            for (size_t i = 0; i < bytesStr.size(); i++) {
+                if (isspace(bytesStr[i])) continue;
+                if (i + 1 < bytesStr.size() && isxdigit(bytesStr[i]) && isxdigit(bytesStr[i + 1])) {
+                    char tmp[3] = { bytesStr[i], bytesStr[i + 1], 0 };
+                    bytes.push_back((BYTE)strtoul(tmp, nullptr, 16));
+                    i++;
+                }
+            }
+
+            if (!PatchManager::ApplyPatch(patchName, addr, bytes.data(), (int)bytes.size())) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed to apply patch (already exists or bad address)"}}}}, {"isError", true}};
+            }
+
+            json info = {{"status", "applied"}, {"name", patchName}, {"address", addrStr}, {"size", bytes.size()}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "toggle_patch") {
+            std::string patchName = arguments.value("name", "");
+            if (!PatchManager::TogglePatch(patchName)) {
+                return {{"content", {{{"type", "text"}, {"text", "Patch not found: " + patchName}}}}, {"isError", true}};
+            }
+            return {{"content", {{{"type", "text"}, {"text", "Patch toggled: " + patchName}}}}};
+        }
+
+        if (name == "import_patches") {
+            std::string patchesJson = arguments.value("patches", "");
+            int count = PatchManager::ImportPatches(patchesJson);
+            json info = {{"imported", count}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "export_patches") {
+            auto patches = PatchManager::ListPatches();
+            json exportData = json::array();
+
+            for (auto& p : patches) {
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", p.address);
+
+                // Find which module this address belongs to
+                char modName[64] = "unknown";
+                DWORD modBase = 0;
+                HMODULE hMods[256];
+                DWORD cbNeeded;
+                if (EnumProcessModules(GetCurrentProcess(), hMods, sizeof(hMods), &cbNeeded)) {
+                    int cnt = cbNeeded / sizeof(HMODULE);
+                    for (int i = 0; i < cnt; i++) {
+                        MODULEINFO mi;
+                        if (GetModuleInformation(GetCurrentProcess(), hMods[i], &mi, sizeof(mi))) {
+                            DWORD base = (DWORD)mi.lpBaseOfDll;
+                            if (p.address >= base && p.address < base + mi.SizeOfImage) {
+                                GetModuleBaseNameA(GetCurrentProcess(), hMods[i], modName, sizeof(modName));
+                                modBase = base;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                exportData.push_back({
+                    {"name", p.name},
+                    {"module", modName},
+                    {"offset", p.address - modBase},
+                    {"address", addrBuf},
+                    {"original", p.originalHex},
+                    {"patched", p.patchedHex},
+                    {"size", p.size}
+                });
+            }
+
+            // Write to file
+            std::string filePath = arguments.value("file", "");
+            if (filePath.empty()) {
+                char exePath[MAX_PATH];
+                GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+                std::string dir(exePath);
+                dir = dir.substr(0, dir.find_last_of("\\/") + 1);
+                filePath = dir + "patches_export.json";
+            }
+
+            std::ofstream fout(filePath);
+            if (fout.is_open()) {
+                fout << exportData.dump(2) << std::endl;
+                fout.close();
+            }
+
+            json info = {
+                {"exported", exportData.size()},
+                {"file", filePath},
+                {"patches", exportData}
+            };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 

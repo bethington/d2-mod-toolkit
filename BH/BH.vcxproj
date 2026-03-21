@@ -156,6 +156,7 @@
   <ItemGroup>
     <ClCompile Include="AutoPickup.cpp" />
     <ClCompile Include="CrashCatcher.cpp" />
+    <ClCompile Include="PatchManager.cpp" />
     <ClCompile Include="GameNav.cpp" />
     <ClCompile Include="HookManager.cpp" />
     <ClCompile Include="AutoPotion.cpp" />
@@ -213,6 +214,7 @@
   <ItemGroup>
     <ClInclude Include="AutoPickup.h" />
     <ClInclude Include="CrashCatcher.h" />
+    <ClInclude Include="PatchManager.h" />
     <ClInclude Include="GameNav.h" />
     <ClInclude Include="HookManager.h" />
     <ClInclude Include="AutoPotion.h" />
