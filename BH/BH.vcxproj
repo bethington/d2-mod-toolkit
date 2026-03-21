@@ -156,6 +156,7 @@ powershell.exe -NoProfile -File "$(ProjectDir)..\..\scripts\CopyDataFolder.ps1"<
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="DebugPanel.cpp" />
+    <ClCompile Include="GameState.cpp" />
     <ClCompile Include="McpServer.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\imgui.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\imgui_draw.cpp" />
@@ -207,6 +208,7 @@ powershell.exe -NoProfile -File "$(ProjectDir)..\..\scripts\CopyDataFolder.ps1"<
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DebugPanel.h" />
+    <ClInclude Include="GameState.h" />
     <ClInclude Include="McpServer.h" />
     <ClInclude Include="AsyncDrawBuffer.h" />
     <ClInclude Include="BH.h" />

@@ -275,6 +275,17 @@ void Config::SaveConfig()
 	jsonBHUI["size_y"] = App.bhui.sizeY.value;
 	App.jsonConfig["bh_ui"] = jsonBHUI;
 
+	// Debug panel settings
+	json jsonDebugPanel;
+	jsonDebugPanel["enabled"] = App.debugPanel.enabled.value;
+	jsonDebugPanel["pos_x"] = App.debugPanel.posX.value;
+	jsonDebugPanel["pos_y"] = App.debugPanel.posY.value;
+	jsonDebugPanel["width"] = App.debugPanel.width.value;
+	jsonDebugPanel["height"] = App.debugPanel.height.value;
+	jsonDebugPanel["dpi_preset"] = App.debugPanel.dpiPreset.value;
+	jsonDebugPanel["mcp_port"] = App.debugPanel.mcpPort.value;
+	App.jsonConfig["debug_panel"] = jsonDebugPanel;
+
 	std::ofstream fout(App.jsonFile);
 	fout << std::setw(4) << App.jsonConfig << std::endl;
 	fout.close();
@@ -416,6 +427,14 @@ void Config::LoadConfig()
 	App.bhui.sizeX.value = GetInt("/bh_ui"_json_pointer, "size_x", App.bhui.sizeX);
 	App.bhui.sizeY.value = GetInt("/bh_ui"_json_pointer, "size_y", App.bhui.sizeY);
 
+	// Debug panel settings
+	App.debugPanel.enabled.value = GetBool("/debug_panel"_json_pointer, "enabled", App.debugPanel.enabled);
+	App.debugPanel.posX.value = GetInt("/debug_panel"_json_pointer, "pos_x", App.debugPanel.posX);
+	App.debugPanel.posY.value = GetInt("/debug_panel"_json_pointer, "pos_y", App.debugPanel.posY);
+	App.debugPanel.width.value = GetInt("/debug_panel"_json_pointer, "width", App.debugPanel.width);
+	App.debugPanel.height.value = GetInt("/debug_panel"_json_pointer, "height", App.debugPanel.height);
+	App.debugPanel.dpiPreset.value = GetInt("/debug_panel"_json_pointer, "dpi_preset", App.debugPanel.dpiPreset);
+	App.debugPanel.mcpPort.value = GetInt("/debug_panel"_json_pointer, "mcp_port", App.debugPanel.mcpPort);
 
 	if (bCreateFile)
 	{

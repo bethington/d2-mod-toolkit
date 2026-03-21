@@ -1,5 +1,7 @@
 #include "DebugPanel.h"
 #include "McpServer.h"
+#include "GameState.h"
+#include "BH.h"
 
 #include <windows.h>
 #include <shellscalingapi.h>
@@ -160,6 +162,23 @@ namespace {
                 ResetDevice();
             }
             return 0;
+        case WM_MOVE: {
+            RECT r;
+            GetWindowRect(hWnd, &r);
+            App.debugPanel.posX.value = r.left;
+            App.debugPanel.posY.value = r.top;
+            return 0;
+        }
+        case WM_EXITSIZEMOVE: {
+            // Save dimensions after user finishes dragging/resizing
+            RECT r;
+            GetWindowRect(hWnd, &r);
+            App.debugPanel.posX.value = r.left;
+            App.debugPanel.posY.value = r.top;
+            App.debugPanel.width.value = r.right - r.left;
+            App.debugPanel.height.value = r.bottom - r.top;
+            return 0;
+        }
         case WM_DPICHANGED: {
             // Per-monitor DPI change — window was dragged to a different monitor
             float newDpi = (float)HIWORD(wParam);
@@ -209,12 +228,12 @@ namespace {
             if (ImGui::SmallButton(dpiLabel)) {
                 g_dpiPresetIndex = (g_dpiPresetIndex + 1) % DPI_PRESET_COUNT;
                 if (g_dpiPresetIndex == 0) {
-                    // Back to auto — use detected DPI
                     g_dpiScale = g_dpiAutoScale;
                 } else {
                     g_dpiScale = DPI_PRESETS[g_dpiPresetIndex];
                 }
                 g_fontRebuildNeeded = true;
+                App.debugPanel.dpiPreset.value = g_dpiPresetIndex;
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Click to cycle: Auto, 100%%, 125%%, 150%%, 175%%, 200%%, 250%%, 300%%");
@@ -231,15 +250,119 @@ namespace {
 
         if (ImGui::BeginTabBar("DebugTabs")) {
             if (ImGui::BeginTabItem("Player")) {
-                ImGui::Text("Player state will appear here.");
-                ImGui::Text("HP / MP / Position / Area / Level / Class");
-                ImGui::Separator();
-                ImGui::Text("Belt Contents:");
-                ImGui::Text("  [slot display pending]");
+                if (!GameState::IsGameReady()) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Not in game");
+                } else {
+                    auto ps = GameState::GetPlayerState();
+                    const char* classNames[] = {"Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"};
+                    const char* cls = (ps.classId >= 0 && ps.classId <= 6) ? classNames[ps.classId] : "Unknown";
+
+                    ImGui::Text("%s - Level %d %s", ps.name, ps.level, cls);
+                    ImGui::Text("Act %d  Area %d  Position (%d, %d)", ps.act + 1, ps.area, ps.x, ps.y);
+                    ImGui::Separator();
+
+                    // HP bar
+                    int hp = ps.hp >> 8, maxHp = ps.maxHp >> 8;
+                    float hpFrac = maxHp > 0 ? (float)hp / maxHp : 0;
+                    char hpLabel[32]; snprintf(hpLabel, sizeof(hpLabel), "HP: %d / %d", hp, maxHp);
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
+                    ImGui::ProgressBar(hpFrac, ImVec2(-1, 0), hpLabel);
+                    ImGui::PopStyleColor();
+
+                    // MP bar
+                    int mp = ps.mana >> 8, maxMp = ps.maxMana >> 8;
+                    float mpFrac = maxMp > 0 ? (float)mp / maxMp : 0;
+                    char mpLabel[32]; snprintf(mpLabel, sizeof(mpLabel), "Mana: %d / %d", mp, maxMp);
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.1f, 0.2f, 0.8f, 1.0f));
+                    ImGui::ProgressBar(mpFrac, ImVec2(-1, 0), mpLabel);
+                    ImGui::PopStyleColor();
+
+                    // Stamina bar
+                    int stam = ps.stamina >> 8, maxStam = ps.maxStamina >> 8;
+                    float stamFrac = maxStam > 0 ? (float)stam / maxStam : 0;
+                    char stamLabel[32]; snprintf(stamLabel, sizeof(stamLabel), "Stamina: %d / %d", stam, maxStam);
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.6f, 0.1f, 1.0f));
+                    ImGui::ProgressBar(stamFrac, ImVec2(-1, 0), stamLabel);
+                    ImGui::PopStyleColor();
+
+                    ImGui::Separator();
+                    ImGui::Text("Gold: %d  Stash: %d", ps.gold, ps.goldStash);
+                    ImGui::Text("FCR: %d  FHR: %d  FBR: %d  IAS: %d  FRW: %d  MF: %d",
+                        ps.fcr, ps.fhr, ps.fbr, ps.ias, ps.frw, ps.mf);
+                    ImGui::Text("Res: Fire %d  Cold %d  Light %d  Poison %d",
+                        ps.fireRes, ps.coldRes, ps.lightRes, ps.poisonRes);
+
+                    // Belt
+                    ImGui::Separator();
+                    ImGui::Text("Belt:");
+                    auto belt = GameState::GetBeltState();
+                    for (int row = 0; row < belt.rows; ++row) {
+                        for (int col = 0; col < belt.columns; ++col) {
+                            if (col > 0) ImGui::SameLine();
+                            int idx = row * belt.columns + col;
+                            const auto& slot = belt.slots[idx];
+                            if (slot.occupied) {
+                                ImGui::Button(slot.name, ImVec2(80 * g_dpiScale, 24 * g_dpiScale));
+                            } else {
+                                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));
+                                ImGui::Button("--", ImVec2(80 * g_dpiScale, 24 * g_dpiScale));
+                                ImGui::PopStyleColor();
+                            }
+                        }
+                    }
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("World")) {
-                ImGui::Text("Nearby monsters and ground items will appear here.");
+                if (!GameState::IsGameReady()) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Not in game");
+                } else {
+                    auto units = GameState::GetNearbyUnits(40);
+
+                    // Split into monsters and items
+                    ImGui::Text("Nearby Units: %d", (int)units.size());
+                    ImGui::Separator();
+
+                    if (ImGui::BeginTable("UnitsTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 70 * g_dpiScale);
+                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("HP", ImGuiTableColumnFlags_WidthFixed, 80 * g_dpiScale);
+                        ImGui::TableSetupColumn("Dist", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
+                        ImGui::TableSetupColumn("Pos", ImGuiTableColumnFlags_WidthFixed, 100 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (const auto& u : units) {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+
+                            const char* typeNames[] = {"Player", "Monster", "Object", "Missile", "Item", "Tile"};
+                            const char* tname = (u.type >= 0 && u.type <= 5) ? typeNames[u.type] : "?";
+
+                            if (u.isBoss) ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "%s", tname);
+                            else if (u.isChampion) ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "%s", tname);
+                            else ImGui::Text("%s", tname);
+
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%s", u.name);
+
+                            ImGui::TableNextColumn();
+                            if (u.type == 1 || u.type == 0) {
+                                int hp = u.hp >> 8, mhp = u.maxHp >> 8;
+                                if (u.mode == 0 || u.mode == 12)
+                                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Dead");
+                                else
+                                    ImGui::Text("%d/%d", hp, mhp);
+                            }
+
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%d", u.distance);
+
+                            ImGui::TableNextColumn();
+                            ImGui::Text("(%d,%d)", u.x, u.y);
+                        }
+                        ImGui::EndTable();
+                    }
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Debug")) {
@@ -270,9 +393,31 @@ namespace {
     // Find the monitor where the game window lives
     // and compute a position below the game window on that monitor
     void ComputePanelPosition(int& outX, int& outY, int& outW, int& outH) {
-        HWND gameHwnd = nullptr;
+        // Check if we have a saved position from config
+        bool hasSavedPos = (App.debugPanel.posX.value != -1 && App.debugPanel.posY.value != -1);
 
-        // Wait briefly for game window to appear
+        if (hasSavedPos) {
+            outX = App.debugPanel.posX.value;
+            outY = App.debugPanel.posY.value;
+            outW = App.debugPanel.width.value;
+            outH = App.debugPanel.height.value;
+
+            // Get DPI for the saved position
+            POINT pt = { outX, outY };
+            HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            g_dpiAutoScale = GetDpiScaleForMonitor(hMon);
+            g_dpiScale = g_dpiAutoScale;
+
+            // Restore DPI preset if saved
+            g_dpiPresetIndex = App.debugPanel.dpiPreset.value;
+            if (g_dpiPresetIndex > 0 && g_dpiPresetIndex < DPI_PRESET_COUNT) {
+                g_dpiScale = DPI_PRESETS[g_dpiPresetIndex];
+            }
+            return;
+        }
+
+        // Auto-position: find game window and position below it
+        HWND gameHwnd = nullptr;
         for (int i = 0; i < 30 && !gameHwnd; ++i) {
             gameHwnd = FindWindow(nullptr, "Diablo II");
             if (!gameHwnd) Sleep(200);
@@ -293,29 +438,23 @@ namespace {
             outW = (int)(BASE_WINDOW_W * g_dpiScale);
             outH = (int)(BASE_WINDOW_H * g_dpiScale);
 
-            // Position below the game window, left-aligned with it
             outX = gameRect.left;
             outY = gameRect.bottom + 5;
 
-            // If it would go off the bottom of the monitor, position at the
-            // bottom of the work area and shrink if needed
             int monitorBottom = mi.rcWork.bottom;
             if (outY + outH > monitorBottom) {
                 outY = monitorBottom - outH;
-                // If still off screen, just use the bottom portion
                 if (outY < mi.rcWork.top) {
                     outY = mi.rcWork.top;
                     outH = monitorBottom - outY;
                 }
             }
 
-            // Clamp width to monitor
             int monitorRight = mi.rcWork.right;
             if (outX + outW > monitorRight) {
                 outW = monitorRight - outX;
             }
         } else {
-            // No game window found — use defaults
             HDC hdc = GetDC(nullptr);
             g_dpiAutoScale = (float)GetDeviceCaps(hdc, LOGPIXELSX) / 96.0f;
             g_dpiScale = g_dpiAutoScale;

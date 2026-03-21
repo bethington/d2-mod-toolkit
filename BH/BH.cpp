@@ -129,10 +129,12 @@ void BH::Initialize()
 	CreateThread(0, 0, GameThread, 0, 0, 0);
 
 	// Launch the ImGui debug panel on a separate thread/window
-	DebugPanel::Init();
+	if (App.debugPanel.enabled.value) {
+		DebugPanel::Init();
+	}
 
 	// Start the MCP HTTP server
-	McpServer::Init(21337);
+	McpServer::Init(App.debugPanel.mcpPort.value);
 
 	initialized = true;
 }

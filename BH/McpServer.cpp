@@ -4,6 +4,7 @@
 
 #define CPPHTTPLIB_NO_EXCEPTIONS
 #include "McpServer.h"
+#include "GameState.h"
 
 #include <windows.h>
 #include <thread>
@@ -104,6 +105,41 @@ namespace {
             }}
         });
 
+        tools.push_back({
+            {"name", "get_player_state"},
+            {"description", "Get current player state: HP, MP, position, area, level, class, stats, resistances."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_belt_contents"},
+            {"description", "Get contents of the player's belt slots (potions, etc)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_nearby_units"},
+            {"description", "Get list of nearby units (monsters, players, items) sorted by distance."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"max_distance", {
+                        {"type", "integer"},
+                        {"description", "Maximum distance from player (default 40)"}
+                    }}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
         return tools;
     }
 
@@ -119,7 +155,6 @@ namespace {
         }
 
         if (name == "get_game_info") {
-            // Basic process info for now — will expand in Phase 2
             DWORD pid = GetCurrentProcessId();
             char exePath[MAX_PATH] = {};
             GetModuleFileNameA(nullptr, exePath, MAX_PATH);
@@ -129,7 +164,168 @@ namespace {
                 {"executable", exePath},
                 {"mcp_port", g_port},
                 {"request_count", g_requestCount.load()},
+                {"game_ready", GameState::IsGameReady()},
                 {"status", "running"}
+            };
+
+            return {
+                {"content", {{
+                    {"type", "text"},
+                    {"text", info.dump(2)}
+                }}}
+            };
+        }
+
+        if (name == "get_player_state") {
+            if (!GameState::IsGameReady()) {
+                return {
+                    {"content", {{
+                        {"type", "text"},
+                        {"text", "Not in game"}
+                    }}},
+                    {"isError", true}
+                };
+            }
+
+            auto ps = GameState::GetPlayerState();
+            const char* classNames[] = {"Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"};
+            const char* className = (ps.classId >= 0 && ps.classId <= 6) ? classNames[ps.classId] : "Unknown";
+
+            json info = {
+                {"name", ps.name},
+                {"class", className},
+                {"class_id", ps.classId},
+                {"level", ps.level},
+                {"hp", ps.hp >> 8},
+                {"max_hp", ps.maxHp >> 8},
+                {"mana", ps.mana >> 8},
+                {"max_mana", ps.maxMana >> 8},
+                {"stamina", ps.stamina >> 8},
+                {"max_stamina", ps.maxStamina >> 8},
+                {"position", {{"x", ps.x}, {"y", ps.y}}},
+                {"area", ps.area},
+                {"act", ps.act + 1},
+                {"gold", ps.gold},
+                {"gold_stash", ps.goldStash},
+                {"stats", {
+                    {"fcr", ps.fcr},
+                    {"fhr", ps.fhr},
+                    {"fbr", ps.fbr},
+                    {"ias", ps.ias},
+                    {"frw", ps.frw},
+                    {"mf", ps.mf}
+                }},
+                {"resistances", {
+                    {"fire", ps.fireRes},
+                    {"cold", ps.coldRes},
+                    {"lightning", ps.lightRes},
+                    {"poison", ps.poisonRes}
+                }}
+            };
+
+            return {
+                {"content", {{
+                    {"type", "text"},
+                    {"text", info.dump(2)}
+                }}}
+            };
+        }
+
+        if (name == "get_belt_contents") {
+            if (!GameState::IsGameReady()) {
+                return {
+                    {"content", {{
+                        {"type", "text"},
+                        {"text", "Not in game"}
+                    }}},
+                    {"isError", true}
+                };
+            }
+
+            auto belt = GameState::GetBeltState();
+            json slots = json::array();
+            for (int i = 0; i < belt.columns * belt.rows; ++i) {
+                const auto& s = belt.slots[i];
+                if (s.occupied) {
+                    slots.push_back({
+                        {"slot", i},
+                        {"column", i % belt.columns},
+                        {"row", i / belt.columns},
+                        {"name", s.name},
+                        {"item_code", s.itemCode}
+                    });
+                } else {
+                    slots.push_back({
+                        {"slot", i},
+                        {"column", i % belt.columns},
+                        {"row", i / belt.columns},
+                        {"empty", true}
+                    });
+                }
+            }
+
+            json info = {
+                {"columns", belt.columns},
+                {"rows", belt.rows},
+                {"slots", slots}
+            };
+
+            return {
+                {"content", {{
+                    {"type", "text"},
+                    {"text", info.dump(2)}
+                }}}
+            };
+        }
+
+        if (name == "get_nearby_units") {
+            if (!GameState::IsGameReady()) {
+                return {
+                    {"content", {{
+                        {"type", "text"},
+                        {"text", "Not in game"}
+                    }}},
+                    {"isError", true}
+                };
+            }
+
+            int maxDist = arguments.value("max_distance", 40);
+            auto units = GameState::GetNearbyUnits(maxDist);
+
+            json unitList = json::array();
+            const char* typeNames[] = {"player", "monster", "object", "missile", "item", "tile"};
+
+            for (const auto& u : units) {
+                json uj = {
+                    {"type", (u.type >= 0 && u.type <= 5) ? typeNames[u.type] : "unknown"},
+                    {"class_id", u.classId},
+                    {"unit_id", u.unitId},
+                    {"position", {{"x", u.x}, {"y", u.y}}},
+                    {"distance", u.distance},
+                    {"name", u.name}
+                };
+
+                if (u.type == 1) { // Monster
+                    uj["hp"] = u.maxHp > 0 ? u.hp >> 8 : 0;
+                    uj["max_hp"] = u.maxHp >> 8;
+                    uj["is_boss"] = u.isBoss;
+                    uj["is_champion"] = u.isChampion;
+                    uj["is_minion"] = u.isMinion;
+                    uj["dead"] = (u.mode == 0 || u.mode == 12);
+                }
+
+                if (u.type == 0) { // Player
+                    uj["hp"] = u.hp >> 8;
+                    uj["max_hp"] = u.maxHp >> 8;
+                }
+
+                unitList.push_back(uj);
+            }
+
+            json info = {
+                {"count", unitList.size()},
+                {"max_distance", maxDist},
+                {"units", unitList}
             };
 
             return {

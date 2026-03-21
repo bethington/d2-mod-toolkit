@@ -1,6 +1,7 @@
 ﻿#include "D2Ptrs.h"
 #include "BH.h"
 #include "D2Stubs.h"
+#include "GameState.h"
 
 #include <iterator>
 
@@ -22,6 +23,7 @@ void OOGDraw() {
 
 void GameLoop() {
 	__raise BH::moduleManager->OnLoop();
+	GameState::Update();
 }
 
 DWORD WINAPI GameThread(VOID* lpvoid) {

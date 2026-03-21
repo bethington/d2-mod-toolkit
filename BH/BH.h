@@ -67,6 +67,17 @@ struct BHApp
 
 	struct
 	{
+		SettingsBool enabled = { true, true };
+		SettingsInt posX = { 0, -1, -10000, 10000 };  // -1 = auto position
+		SettingsInt posY = { 0, -1, -10000, 10000 };
+		SettingsInt width = { 0, 900, 200, 4000 };
+		SettingsInt height = { 0, 700, 200, 4000 };
+		SettingsInt dpiPreset = { 0, 0, 0, 7 };       // 0=auto, 1-7=manual
+		SettingsInt mcpPort = { 21337, 21337, 1024, 65535 };
+	} debugPanel;
+
+	struct
+	{
 		SettingsBool autofillLastGame = { true, true };
 		SettingsBool autofillNextGame = { true, true };
 		SettingsBool autofillLastPass = { true, true };
