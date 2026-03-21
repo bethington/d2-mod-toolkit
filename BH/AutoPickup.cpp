@@ -6,13 +6,38 @@
 
 #include <mutex>
 #include <cmath>
+#include <map>
 
 namespace {
     std::mutex g_mutex;
     AutoPickup::Config g_config;
     AutoPickup::BeltSnapshot g_snapshot;
     DWORD g_lastPickTime = 0;
-    bool g_wasEnabled = false;  // track enable transitions for auto-snapshot
+    bool g_wasEnabled = false;
+
+    // Blacklist: items we tried to pick up but failed
+    // Maps unit ID → tick when blacklisted
+    static const DWORD BLACKLIST_DURATION_MS = 3000;
+    std::map<DWORD, DWORD> g_blacklist;
+
+    bool IsBlacklisted(DWORD unitId, DWORD now) {
+        auto it = g_blacklist.find(unitId);
+        if (it == g_blacklist.end()) return false;
+        if (now - it->second >= BLACKLIST_DURATION_MS) {
+            g_blacklist.erase(it);
+            return false;
+        }
+        return true;
+    }
+
+    void PruneBlacklist(DWORD now) {
+        for (auto it = g_blacklist.begin(); it != g_blacklist.end(); ) {
+            if (now - it->second >= BLACKLIST_DURATION_MS)
+                it = g_blacklist.erase(it);
+            else
+                ++it;
+        }
+    }
 
     // ---- Item Classification ----
 
@@ -263,6 +288,9 @@ namespace AutoPickup {
         DWORD now = GetTickCount();
         if (now - g_lastPickTime < (DWORD)cfg.cooldownMs) return;
 
+        // Prune expired blacklist entries periodically
+        PruneBlacklist(now);
+
         // Check tome charges for scroll pickup
         g_needTpScrolls = false;
         g_needIdScrolls = false;
@@ -295,6 +323,7 @@ namespace AutoPickup {
                 if (pUnit->dwType != 4) continue;
                 if (!pUnit->pItemData) continue;
                 if (pUnit->dwMode != 3 && pUnit->dwMode != 5) continue;
+                if (IsBlacklisted(pUnit->dwUnitId, now)) continue;
 
                 DWORD code = pUnit->dwTxtFileNo;
 
@@ -377,6 +406,7 @@ namespace AutoPickup {
 
         if (bestItem) {
             PickupItem(bestItem->dwUnitId);
+            g_blacklist[bestItem->dwUnitId] = now;
             g_lastPickTime = now;
         }
     }
