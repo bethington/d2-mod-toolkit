@@ -29,6 +29,7 @@ void GameLoop() {
 	GameState::Update();
 	AutoPotion::Update();
 	AutoPickup::Update();
+	GameNav::CheckPendingExit();
 }
 
 DWORD WINAPI GameThread(VOID* lpvoid) {

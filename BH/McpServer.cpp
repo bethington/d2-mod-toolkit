@@ -239,6 +239,12 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "get_controls"},
+            {"description", "Dump all UI controls on the current screen (buttons, editboxes, etc.) with positions and states. Useful for debugging menu navigation."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
             {"name", "exit_game"},
             {"description", "Gracefully exit the current game (save and return to menu). Does nothing if not in-game."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
@@ -765,8 +771,33 @@ namespace {
             if (!GameState::IsGameReady()) {
                 return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}};
             }
-            D2CLIENT_ExitGame();
-            return {{"content", {{{"type", "text"}, {"text", "Exit game initiated — saving and returning to menu"}}}}};
+            // Queue exit to be executed on the game thread (calling D2CLIENT_ExitGame
+            // from the HTTP thread can crash)
+            GameNav::RequestExitGame();
+            return {{"content", {{{"type", "text"}, {"text", "Exit game queued — will save and return to menu"}}}}};
+        }
+
+        if (name == "get_controls") {
+            Control* pCtrl = *p_D2WIN_FirstControl;
+            json controls = json::array();
+            while (pCtrl) {
+                const char* typeNames[] = {"unknown", "editbox", "image", "unknown3", "unknown4", "unknown5", "button", "list"};
+                const char* typeName = (pCtrl->dwType <= 7) ? typeNames[pCtrl->dwType] : "unknown";
+                json ctrl = {
+                    {"type", typeName},
+                    {"type_id", (int)pCtrl->dwType},
+                    {"state", (int)pCtrl->dwState},
+                    {"x", (int)pCtrl->dwPosX},
+                    {"y", (int)pCtrl->dwPosY},
+                    {"w", (int)pCtrl->dwSizeX},
+                    {"h", (int)pCtrl->dwSizeY},
+                    {"has_on_press", pCtrl->OnPress != nullptr}
+                };
+                controls.push_back(ctrl);
+                pCtrl = pCtrl->pNext;
+            }
+            json info = {{"count", controls.size()}, {"controls", controls}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "enter_game") {

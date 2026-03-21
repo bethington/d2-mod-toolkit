@@ -18,6 +18,7 @@ namespace {
     DWORD g_lastStepTime = 0;
     DWORD g_stepDelay = 500; // ms between steps
     int g_retryCount = 0;
+    bool g_exitRequested = false;
 
     // Count controls by type
     struct ControlCounts {
@@ -92,20 +93,35 @@ namespace {
 
         ControlCounts cc = CountControls();
 
-        // Main Menu: ~11 controls, 7+ buttons, buttons around x=264
-        // Character Select: has a list control and different button layout
-        // Difficulty: 3-4 buttons stacked vertically
+        // Screen identification by button count and layout:
+        // Main Menu: 7 buttons, all at x=264
+        // Character Select: 5 buttons, OK at (627,572), Create/Convert/Delete at y=528
+        // Difficulty: 3-4 buttons stacked vertically around x=264
 
-        if (cc.lists > 0) {
-            // Character select has a list for character names
-            return OOG_CHAR_SELECT;
+        // Check for Character Select: has an OK button at bottom-right (627, 572)
+        // and character slots (type 4) in the middle
+        if (cc.buttons >= 4 && cc.buttons <= 6) {
+            // Look for OK button at bottom-right
+            Control* pOK = *p_D2WIN_FirstControl;
+            bool hasOKButton = false;
+            int type4Count = 0;
+            while (pOK) {
+                if (pOK->dwType == CTRL_TYPE_BUTTON && pOK->dwPosX > 600 && pOK->dwPosY > 550) {
+                    hasOKButton = true;
+                }
+                if (pOK->dwType == 4) type4Count++;
+                pOK = pOK->pNext;
+            }
+            if (hasOKButton && type4Count >= 4) {
+                return OOG_CHAR_SELECT;
+            }
         }
 
         if (cc.buttons >= 6) {
             return OOG_MAIN_MENU;
         }
 
-        if (cc.buttons >= 2 && cc.buttons <= 4 && cc.total <= 8) {
+        if (cc.buttons >= 2 && cc.buttons <= 4 && cc.total <= 10) {
             return OOG_DIFFICULTY;
         }
 
@@ -183,8 +199,8 @@ namespace GameNav {
                 // TODO: if charName specified, find and click on that character in the list
                 // For now, just click OK to use whatever is selected
                 g_status.message = "Clicking OK...";
-                // OK button is typically at bottom-right, around x=627, y=568
-                Control* btn = FindButton(600, 700, 555, 580);
+                // OK button at bottom-right: (627, 572) size 128x35
+                Control* btn = FindButton(600, 760, 560, 610);
                 if (btn) {
                     ClickControl(btn);
                     g_status.step = 2;
@@ -245,6 +261,19 @@ namespace GameNav {
                     g_status.message = "Failed: stuck on unknown screen";
                 }
                 return;
+        }
+    }
+
+    void RequestExitGame() {
+        g_exitRequested = true;
+    }
+
+    void CheckPendingExit() {
+        if (g_exitRequested) {
+            g_exitRequested = false;
+            if (IsGameReady()) {
+                D2CLIENT_ExitGame();
+            }
         }
     }
 }
