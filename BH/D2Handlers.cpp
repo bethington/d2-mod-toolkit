@@ -3,6 +3,7 @@
 #include "D2Stubs.h"
 #include "GameState.h"
 #include "AutoPotion.h"
+#include "AutoPickup.h"
 
 #include <iterator>
 
@@ -26,6 +27,7 @@ void GameLoop() {
 	__raise BH::moduleManager->OnLoop();
 	GameState::Update();
 	AutoPotion::Update();
+	AutoPickup::Update();
 }
 
 DWORD WINAPI GameThread(VOID* lpvoid) {

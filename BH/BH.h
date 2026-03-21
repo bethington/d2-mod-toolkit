@@ -88,6 +88,16 @@ struct BHApp
 
 	struct
 	{
+		SettingsBool enabled = { false, false };
+		SettingsInt maxDistance = { 15, 15, 1, 40 };
+		SettingsInt cooldownMs = { 250, 250, 100, 5000 };
+		SettingsBool pickHpPotions = { true, true };
+		SettingsBool pickMpPotions = { true, true };
+		SettingsBool pickRejuvs = { true, true };
+	} autoPickup;
+
+	struct
+	{
 		SettingsBool autofillLastGame = { true, true };
 		SettingsBool autofillNextGame = { true, true };
 		SettingsBool autofillLastPass = { true, true };

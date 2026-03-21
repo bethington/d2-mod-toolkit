@@ -1,6 +1,8 @@
 #include "DebugPanel.h"
 #include "McpServer.h"
 #include "GameState.h"
+#include "AutoPotion.h"
+#include "AutoPickup.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -469,6 +471,72 @@ namespace {
                         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.6f, 0.1f, 1.0f));
                         ImGui::ProgressBar(maxStam > 0 ? (float)stam / maxStam : 0, ImVec2(barW, 0), stamLabel);
                         ImGui::PopStyleColor();
+                    }
+
+                    // -- Auto-Potion Controls --
+                    ImGui::Separator();
+                    {
+                        auto apc = AutoPotion::GetConfig();
+                        bool changed = false;
+
+                        ImGui::TextColored(cGold, "Auto-Potion:"); ImGui::SameLine();
+                        if (ImGui::Checkbox("Enabled", &apc.enabled)) changed = true;
+
+                        if (apc.enabled) {
+                            ImGui::SameLine();
+                            ImGui::PushItemWidth(60 * g_dpiScale);
+                            ImGui::TextColored(cRed, "  HP:"); ImGui::SameLine();
+                            if (ImGui::InputInt("##hp", &apc.hpThreshold, 0, 0)) changed = true;
+                            ImGui::SameLine(); ImGui::Text("%%");
+                            ImGui::SameLine();
+                            ImGui::TextColored(cBlue, "  MP:"); ImGui::SameLine();
+                            if (ImGui::InputInt("##mp", &apc.mpThreshold, 0, 0)) changed = true;
+                            ImGui::SameLine(); ImGui::Text("%%");
+                            ImGui::SameLine();
+                            ImGui::TextColored(cPurple, "  Rejuv:"); ImGui::SameLine();
+                            if (ImGui::InputInt("##rejuv", &apc.rejuvThreshold, 0, 0)) changed = true;
+                            ImGui::SameLine(); ImGui::Text("%%");
+                            ImGui::PopItemWidth();
+                        }
+
+                        if (changed) {
+                            if (apc.hpThreshold < 0) apc.hpThreshold = 0;
+                            if (apc.hpThreshold > 100) apc.hpThreshold = 100;
+                            if (apc.mpThreshold < 0) apc.mpThreshold = 0;
+                            if (apc.mpThreshold > 100) apc.mpThreshold = 100;
+                            if (apc.rejuvThreshold < 0) apc.rejuvThreshold = 0;
+                            if (apc.rejuvThreshold > 100) apc.rejuvThreshold = 100;
+                            AutoPotion::SetConfig(apc);
+                        }
+                    }
+
+                    // -- Auto-Pickup Controls --
+                    {
+                        auto auc = AutoPickup::GetConfig();
+                        bool changed = false;
+
+                        ImGui::TextColored(cGold, "Auto-Pickup:"); ImGui::SameLine();
+                        if (ImGui::Checkbox("Enabled##pickup", &auc.enabled)) changed = true;
+
+                        if (auc.enabled) {
+                            ImGui::SameLine();
+                            ImGui::PushItemWidth(50 * g_dpiScale);
+                            ImGui::TextColored(cGold, "  Range:"); ImGui::SameLine();
+                            if (ImGui::InputInt("##range", &auc.maxDistance, 0, 0)) changed = true;
+                            ImGui::PopItemWidth();
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("HP##pickHP", &auc.pickHpPotions)) changed = true;
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("MP##pickMP", &auc.pickMpPotions)) changed = true;
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("Rejuv##pickRJ", &auc.pickRejuvs)) changed = true;
+                        }
+
+                        if (changed) {
+                            if (auc.maxDistance < 1) auc.maxDistance = 1;
+                            if (auc.maxDistance > 40) auc.maxDistance = 40;
+                            AutoPickup::SetConfig(auc);
+                        }
                     }
 
                     // -- Belt --

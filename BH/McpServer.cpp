@@ -6,6 +6,7 @@
 #include "McpServer.h"
 #include "GameState.h"
 #include "AutoPotion.h"
+#include "AutoPickup.h"
 
 #include <windows.h>
 #include <thread>
@@ -182,6 +183,28 @@ namespace {
                     {"rejuv_threshold", {{"type", "integer"}, {"description", "HP % to trigger rejuv (0-100, 0=disabled)"}}},
                     {"cooldown_ms", {{"type", "integer"}, {"description", "Minimum ms between potions (100-5000)"}}},
                     {"skip_in_town", {{"type", "boolean"}, {"description", "Skip auto-potion in town areas"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_auto_pickup"},
+            {"description", "Get auto-pickup configuration."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "set_auto_pickup"},
+            {"description", "Configure auto-pickup settings. Pass only fields to change."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"enabled", {{"type", "boolean"}, {"description", "Enable/disable auto-pickup"}}},
+                    {"max_distance", {{"type", "integer"}, {"description", "Max pickup range in game units (1-40)"}}},
+                    {"pick_hp_potions", {{"type", "boolean"}}},
+                    {"pick_mp_potions", {{"type", "boolean"}}},
+                    {"pick_rejuvs", {{"type", "boolean"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -537,6 +560,40 @@ namespace {
                 {"rejuv_threshold", cfg.rejuvThreshold},
                 {"cooldown_ms", cfg.cooldownMs},
                 {"skip_in_town", cfg.skipInTown}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_auto_pickup") {
+            auto cfg = AutoPickup::GetConfig();
+            json info = {
+                {"enabled", cfg.enabled},
+                {"max_distance", cfg.maxDistance},
+                {"cooldown_ms", cfg.cooldownMs},
+                {"pick_hp_potions", cfg.pickHpPotions},
+                {"pick_mp_potions", cfg.pickMpPotions},
+                {"pick_rejuvs", cfg.pickRejuvs}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "set_auto_pickup") {
+            auto cfg = AutoPickup::GetConfig();
+            if (arguments.contains("enabled")) cfg.enabled = arguments["enabled"].get<bool>();
+            if (arguments.contains("max_distance")) cfg.maxDistance = arguments["max_distance"].get<int>();
+            if (arguments.contains("cooldown_ms")) cfg.cooldownMs = arguments["cooldown_ms"].get<int>();
+            if (arguments.contains("pick_hp_potions")) cfg.pickHpPotions = arguments["pick_hp_potions"].get<bool>();
+            if (arguments.contains("pick_mp_potions")) cfg.pickMpPotions = arguments["pick_mp_potions"].get<bool>();
+            if (arguments.contains("pick_rejuvs")) cfg.pickRejuvs = arguments["pick_rejuvs"].get<bool>();
+            AutoPickup::SetConfig(cfg);
+
+            json info = {
+                {"status", "updated"},
+                {"enabled", cfg.enabled},
+                {"max_distance", cfg.maxDistance},
+                {"pick_hp_potions", cfg.pickHpPotions},
+                {"pick_mp_potions", cfg.pickMpPotions},
+                {"pick_rejuvs", cfg.pickRejuvs}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }

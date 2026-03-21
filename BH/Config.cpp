@@ -296,6 +296,16 @@ void Config::SaveConfig()
 	jsonAutoPotion["skip_in_town"] = App.autoPotion.skipInTown.value;
 	App.jsonConfig["auto_potion"] = jsonAutoPotion;
 
+	// Auto-pickup settings
+	json jsonAutoPickup;
+	jsonAutoPickup["enabled"] = App.autoPickup.enabled.value;
+	jsonAutoPickup["max_distance"] = App.autoPickup.maxDistance.value;
+	jsonAutoPickup["cooldown_ms"] = App.autoPickup.cooldownMs.value;
+	jsonAutoPickup["pick_hp_potions"] = App.autoPickup.pickHpPotions.value;
+	jsonAutoPickup["pick_mp_potions"] = App.autoPickup.pickMpPotions.value;
+	jsonAutoPickup["pick_rejuvs"] = App.autoPickup.pickRejuvs.value;
+	App.jsonConfig["auto_pickup"] = jsonAutoPickup;
+
 	std::ofstream fout(App.jsonFile);
 	fout << std::setw(4) << App.jsonConfig << std::endl;
 	fout.close();
@@ -453,6 +463,14 @@ void Config::LoadConfig()
 	App.autoPotion.rejuvThreshold.value = GetInt("/auto_potion"_json_pointer, "rejuv_threshold", App.autoPotion.rejuvThreshold);
 	App.autoPotion.cooldownMs.value = GetInt("/auto_potion"_json_pointer, "cooldown_ms", App.autoPotion.cooldownMs);
 	App.autoPotion.skipInTown.value = GetBool("/auto_potion"_json_pointer, "skip_in_town", App.autoPotion.skipInTown);
+
+	// Auto-pickup settings
+	App.autoPickup.enabled.value = GetBool("/auto_pickup"_json_pointer, "enabled", App.autoPickup.enabled);
+	App.autoPickup.maxDistance.value = GetInt("/auto_pickup"_json_pointer, "max_distance", App.autoPickup.maxDistance);
+	App.autoPickup.cooldownMs.value = GetInt("/auto_pickup"_json_pointer, "cooldown_ms", App.autoPickup.cooldownMs);
+	App.autoPickup.pickHpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_hp_potions", App.autoPickup.pickHpPotions);
+	App.autoPickup.pickMpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_mp_potions", App.autoPickup.pickMpPotions);
+	App.autoPickup.pickRejuvs.value = GetBool("/auto_pickup"_json_pointer, "pick_rejuvs", App.autoPickup.pickRejuvs);
 
 	if (bCreateFile)
 	{
