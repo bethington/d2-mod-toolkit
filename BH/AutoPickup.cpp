@@ -178,17 +178,25 @@ namespace {
 
     static const int MAX_TOME_CHARGES = 20;
 
-    // Check if an item is a scroll/tome by looking up its game name
-    bool IsItemByName(UnitAny* pItem, const char* nameFragment) {
-        if (!pItem) return false;
-        try {
+    // Check if an item's name contains a fragment — uses SEH since
+    // D2CLIENT_GetUnitName can crash on invalid/transitioning units
+    static bool SafeGetUnitName(UnitAny* pItem, char* outName, int outSize) {
+        __try {
             wchar_t* wName = D2CLIENT_GetUnitName(pItem);
             if (wName) {
-                char name[64] = {};
-                WideCharToMultiByte(CP_UTF8, 0, wName, -1, name, sizeof(name) - 1, nullptr, nullptr);
-                return strstr(name, nameFragment) != nullptr;
+                WideCharToMultiByte(CP_UTF8, 0, wName, -1, outName, outSize - 1, nullptr, nullptr);
+                return true;
             }
-        } catch (...) {}
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
+    }
+
+    bool IsItemByName(UnitAny* pItem, const char* nameFragment) {
+        if (!pItem) return false;
+        char name[64] = {};
+        if (SafeGetUnitName(pItem, name, sizeof(name))) {
+            return strstr(name, nameFragment) != nullptr;
+        }
         return false;
     }
 
@@ -310,11 +318,13 @@ namespace AutoPickup {
                 else if (g_needIdScrolls && IsIdScrollUnit(pUnit)) { priority = 1; }
                 // Check belt refill
                 else if (needBeltRefill) {
-                    // Only pick up potions/consumables, not random items
-                    PotionCategory groundCat = GetCategory(code);
-                    bool isConsumable = (groundCat != CAT_NONE) || IsItemByName(pUnit, "Potion") || IsItemByName(pUnit, "Rejuv");
+                    // Only pick up HP, Mana, or Rejuv potions
+                    bool isHp = IsItemByName(pUnit, "Healing");
+                    bool isMp = IsItemByName(pUnit, "Mana");
+                    bool isRejuv = IsItemByName(pUnit, "Rejuv");
+                    bool isBeltablePotion = isHp || isMp || isRejuv;
 
-                    if (!isConsumable) {} // skip non-consumables
+                    if (!isBeltablePotion) {} // skip non-potions
                     else {
                     // Find which empty column this item could fill
                     for (int col = 0; col < 4; col++) {
@@ -324,7 +334,7 @@ namespace AutoPickup {
                         if (g_snapshot.valid) preferred = g_snapshot.preferredCode[col];
 
                         if (preferred == 0) {
-                            // No preference for this column — accept any potion
+                            // No preference — accept any HP/Mana/Rejuv potion
                             priority = 2;
                             break;
                         }
