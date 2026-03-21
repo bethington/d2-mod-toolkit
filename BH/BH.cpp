@@ -9,6 +9,8 @@
 #include "Modules.h"
 #include "Task.h"
 #include "Drawing/Stats/StatsDisplay.h"
+#include "DebugPanel.h"
+#include "McpServer.h"
 
 string BH::path;
 HINSTANCE BH::instance;
@@ -126,6 +128,12 @@ void BH::Initialize()
 	// loading/installation finishes.
 	CreateThread(0, 0, GameThread, 0, 0, 0);
 
+	// Launch the ImGui debug panel on a separate thread/window
+	DebugPanel::Init();
+
+	// Start the MCP HTTP server
+	McpServer::Init(21337);
+
 	initialized = true;
 }
 
@@ -147,6 +155,9 @@ bool BH::Shutdown()
 
 		oogDraw->Remove();
 	}
+
+	McpServer::Shutdown();
+	DebugPanel::Shutdown();
 
 	return true;
 }

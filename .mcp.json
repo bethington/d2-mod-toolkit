@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "d2-mod-toolkit": {
+      "type": "sse",
+      "url": "http://127.0.0.1:21337/mcp/sse"
+    }
+  }
+}
