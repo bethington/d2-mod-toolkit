@@ -515,6 +515,11 @@ namespace {
                             if (apc.rejuvThreshold < 0) apc.rejuvThreshold = 0;
                             if (apc.rejuvThreshold > 100) apc.rejuvThreshold = 100;
                             AutoPotion::SetConfig(apc);
+                            // Sync to App for persistence
+                            App.autoPotion.enabled.value = apc.enabled;
+                            App.autoPotion.hpThreshold.value = apc.hpThreshold;
+                            App.autoPotion.mpThreshold.value = apc.mpThreshold;
+                            App.autoPotion.rejuvThreshold.value = apc.rejuvThreshold;
                         }
                     }
 
@@ -578,6 +583,11 @@ namespace {
                             if (auc.maxDistance < 1) auc.maxDistance = 1;
                             if (auc.maxDistance > 40) auc.maxDistance = 40;
                             AutoPickup::SetConfig(auc);
+                            // Sync to App for persistence
+                            App.autoPickup.enabled.value = auc.enabled;
+                            App.autoPickup.maxDistance.value = auc.maxDistance;
+                            App.autoPickup.pickTpScrolls.value = auc.pickTpScrolls;
+                            App.autoPickup.pickIdScrolls.value = auc.pickIdScrolls;
                         }
                     }
 

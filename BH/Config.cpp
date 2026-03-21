@@ -1,5 +1,7 @@
 #include "Config.h"
 #include "BH.h"
+#include "AutoPotion.h"
+#include "AutoPickup.h"
 #include <algorithm>
 #include <sstream>
 
@@ -166,6 +168,30 @@ bool bCreateFile = false;
 
 void Config::SaveConfig()
 {
+	// Sync runtime configs back to App before saving
+	{
+		auto apc = AutoPotion::GetConfig();
+		App.autoPotion.enabled.value = apc.enabled;
+		App.autoPotion.hpThreshold.value = apc.hpThreshold;
+		App.autoPotion.mpThreshold.value = apc.mpThreshold;
+		App.autoPotion.rejuvThreshold.value = apc.rejuvThreshold;
+		App.autoPotion.cooldownMs.value = apc.cooldownMs;
+		App.autoPotion.skipInTown.value = apc.skipInTown;
+
+		auto auc = AutoPickup::GetConfig();
+		App.autoPickup.enabled.value = auc.enabled;
+		App.autoPickup.maxDistance.value = auc.maxDistance;
+		App.autoPickup.cooldownMs.value = auc.cooldownMs;
+		App.autoPickup.pickTpScrolls.value = auc.pickTpScrolls;
+		App.autoPickup.pickIdScrolls.value = auc.pickIdScrolls;
+
+		auto snap = AutoPickup::GetSnapshot();
+		App.autoPickup.snapCol0.value = snap.preferredCode[0];
+		App.autoPickup.snapCol1.value = snap.preferredCode[1];
+		App.autoPickup.snapCol2.value = snap.preferredCode[2];
+		App.autoPickup.snapCol3.value = snap.preferredCode[3];
+	}
+
 	// Bnet settings
 	json jsonBnet;
 	jsonBnet["autofill_last_game"] = App.bnet.autofillLastGame.value;
