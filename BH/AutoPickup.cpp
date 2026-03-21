@@ -201,7 +201,7 @@ namespace {
     // ---- Scroll/Tome Logic ----
     // Use game name lookup instead of hardcoded codes since PD2 remaps item IDs.
 
-    static const int MAX_TOME_CHARGES = 20;
+    static const int MAX_TOME_CHARGES = 80; // PD2 tomes hold more than vanilla's 20
 
     // Check if an item's name contains a fragment — uses SEH since
     // D2CLIENT_GetUnitName can crash on invalid/transitioning units
@@ -230,18 +230,20 @@ namespace {
     bool IsIdScrollUnit(UnitAny* pItem) { return IsItemByName(pItem, "Identify"); }
 
     // Find a tome in inventory and return its charge count
-    // Uses name matching: "Tome of Town Portal" or "Tome of Identify"
+    // Gets the full name once and checks for both "Tome" and the scroll type
     int GetTomeCharges(UnitAny* pPlayer, bool isTp) {
         if (!pPlayer || !pPlayer->pInventory) return -1;
-        const char* tomeName = isTp ? "Town Portal" : "Identify";
+        const char* scrollType = isTp ? "Town Portal" : "Identify";
 
         UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
         while (pItem) {
             if (pItem->pItemData) {
-                // Tomes are in inventory (NODEPAGE_STORAGE) and have "Tome" in their name
-                // But we also need to check the name to distinguish TP from ID
-                if (IsItemByName(pItem, "Tome") && IsItemByName(pItem, tomeName)) {
-                    return D2COMMON_GetUnitStat(pItem, STAT_AMMOQUANTITY, 0);
+                char name[64] = {};
+                if (SafeGetUnitName(pItem, name, sizeof(name))) {
+                    // Match "Tome" AND the scroll type in one name lookup
+                    if (strstr(name, "Tome") && strstr(name, scrollType)) {
+                        return D2COMMON_GetUnitStat(pItem, STAT_AMMOQUANTITY, 0);
+                    }
                 }
             }
             pItem = D2COMMON_GetNextItemFromInventory(pItem);

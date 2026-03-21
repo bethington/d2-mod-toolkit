@@ -89,7 +89,7 @@ struct BHApp
 	struct
 	{
 		SettingsBool enabled = { false, false };
-		SettingsInt maxDistance = { 15, 15, 1, 40 };
+		SettingsInt maxDistance = { 5, 5, 1, 40 };
 		SettingsInt cooldownMs = { 250, 250, 100, 5000 };
 		SettingsBool pickTpScrolls = { true, true };
 		SettingsBool pickIdScrolls = { true, true };

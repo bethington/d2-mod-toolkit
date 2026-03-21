@@ -8,7 +8,7 @@
 namespace AutoPickup {
     struct Config {
         bool enabled = false;
-        int maxDistance = 15;       // max pickup range (game units)
+        int maxDistance = 5;        // max pickup range (game units)
         int cooldownMs = 250;       // minimum ms between pickups
         bool pickTpScrolls = true;  // pick up TP scrolls when tome not full
         bool pickIdScrolls = true;  // pick up ID scrolls when tome not full

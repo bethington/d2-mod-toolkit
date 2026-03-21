@@ -7,6 +7,9 @@
 #include "GameState.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "D2Ptrs.h"
+#include "D2Helpers.h"
+#include "Constants.h"
 
 #include <windows.h>
 #include <thread>
@@ -80,6 +83,17 @@ namespace {
         } __except(EXCEPTION_EXECUTE_HANDLER) {
             return false;
         }
+    }
+
+    static bool SafeGetUnitName(UnitAny* pItem, char* outName, int outSize) {
+        __try {
+            wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+            if (wName) {
+                WideCharToMultiByte(CP_UTF8, 0, wName, -1, outName, outSize - 1, nullptr, nullptr);
+                return true;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
     }
 
     static bool SafeMemWrite(DWORD addr, const void* src, size_t size) {
@@ -156,6 +170,18 @@ namespace {
                         {"type", "integer"},
                         {"description", "Maximum distance from player (default 40)"}
                     }}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_inventory"},
+            {"description", "List all items in the player's inventory, belt, equipped, stash, and cube with their game names and codes."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"location", {{"type", "string"}, {"description", "Filter by location: 'all', 'belt', 'inventory', 'equipped', 'stash', 'cube' (default 'all')"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -528,6 +554,55 @@ namespace {
                     {"text", info.dump(2)}
                 }}}
             };
+        }
+
+        if (name == "get_inventory") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            std::string locFilter = arguments.value("location", "all");
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInventory) {
+                return {{"content", {{{"type", "text"}, {"text", "No inventory"}}}}, {"isError", true}};
+            }
+
+            const char* nodePageNames[] = {"ground", "storage", "belt", "equipped"};
+            json items = json::array();
+            UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
+            while (pItem) {
+                if (pItem->pItemData) {
+                    int np = pItem->pItemData->NodePage;
+                    const char* loc = (np >= 0 && np <= 3) ? nodePageNames[np] : "unknown";
+
+                    // Filter
+                    bool include = (locFilter == "all");
+                    if (locFilter == "belt" && np == NODEPAGE_BELTSLOTS) include = true;
+                    if (locFilter == "inventory" && np == NODEPAGE_STORAGE) include = true;
+                    if (locFilter == "equipped" && np == NODEPAGE_EQUIP) include = true;
+
+                    if (include) {
+                        char name[64] = {};
+                        SafeGetUnitName(pItem, name, sizeof(name));
+
+                        int qty = D2COMMON_GetUnitStat(pItem, STAT_AMMOQUANTITY, 0);
+
+                        json item = {
+                            {"code", (int)pItem->dwTxtFileNo},
+                            {"name", name[0] ? name : "?"},
+                            {"location", loc},
+                            {"node_page", np},
+                            {"unit_id", (int)pItem->dwUnitId}
+                        };
+                        if (qty > 0) item["quantity"] = qty;
+                        items.push_back(item);
+                    }
+                }
+                pItem = D2COMMON_GetNextItemFromInventory(pItem);
+            }
+
+            json info = {{"count", items.size()}, {"items", items}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "get_auto_potion") {
