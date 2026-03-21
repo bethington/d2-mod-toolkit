@@ -445,6 +445,7 @@ namespace {
                         {"column", i % belt.columns},
                         {"row", i / belt.columns},
                         {"name", s.name},
+                        {"full_name", s.fullName},
                         {"item_code", s.itemCode}
                     });
                 } else {

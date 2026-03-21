@@ -117,7 +117,8 @@ namespace GameState {
     struct BeltSlot {
         bool occupied = false;
         int itemCode = 0;       // TxtFileNo
-        char name[32] = {};     // item name/code
+        char name[32] = {};     // short label (HP5, MP3, FRJ, etc.)
+        char fullName[64] = {}; // full game name
         int quantity = 0;       // for stackable items
     };
 

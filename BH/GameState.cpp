@@ -369,52 +369,54 @@ namespace {
                     slot.occupied = true;
                     slot.itemCode = pItem->dwTxtFileNo;
 
-                    // Potion short names: HP1-HP5, MP1-MP5, RJ/FRJ
-                    // PD2-S12 TxtFileNo codes (confirmed in-game)
-                    int code = pItem->dwTxtFileNo;
-                    const char* label = nullptr;
-                    switch (code) {
-                        // Health potions (PD2-S12 codes)
-                        case 602: label = "HP1"; break;  // Minor Healing
-                        case 603: label = "HP2"; break;  // Light Healing
-                        case 604: label = "HP3"; break;  // Healing
-                        case 605: label = "HP4"; break;  // Greater Healing
-                        case 606: label = "HP5"; break;  // Super Healing
-                        // Mana potions (PD2-S12 codes)
-                        case 607: label = "MP1"; break;  // Minor Mana
-                        case 608: label = "MP2"; break;  // Light Mana
-                        case 609: label = "MP3"; break;  // Mana
-                        case 610: label = "MP4"; break;  // Greater Mana
-                        case 611: label = "MP5"; break;  // Super Mana
-                        // Rejuvenation potions
-                        case 517: label = "RJ";  break;  // Rejuvenation
-                        case 518: label = "FRJ"; break;  // Full Rejuvenation
-                        // Utility potions
-                        case 515: label = "Antd"; break; // Antidote
-                        case 516: label = "Thaw"; break; // Thawing
-                        case 519: label = "Stam"; break; // Stamina
-                        // Keys & Scrolls
-                        case 528: label = "Key"; break;  // Key (for locked chests)
-                        case 529: label = "TP";  break;  // Town Portal
-                        case 530: label = "ID";  break;  // Identify
-                        // Alternate PD2 codes (older seasons / funmixxed)
-                        case 589: label = "HP1"; break;
-                        case 590: label = "HP2"; break;
-                        case 591: label = "HP3"; break;
-                        case 592: label = "HP4"; break;
-                        case 593: label = "HP5"; break;
-                        case 594: label = "MP1"; break;
-                        case 595: label = "MP2"; break;
-                        case 596: label = "MP3"; break;
-                        case 597: label = "MP4"; break;
-                        case 598: label = "MP5"; break;
-                        case 531: label = "FRJ"; break;  // PD2 Full Rejuv (confirmed)
-                        default: break;
+                    // Get the real item name from the game's data tables
+                    char fullName[64] = {};
+                    try {
+                        wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+                        if (wName) {
+                            WideCharToMultiByte(CP_UTF8, 0, wName, -1, fullName, sizeof(fullName) - 1, nullptr, nullptr);
+                        }
+                    } catch (...) {}
+
+                    // Store full name for MCP/tooltip
+                    if (fullName[0]) {
+                        strncpy_s(slot.fullName, fullName, sizeof(slot.fullName) - 1);
                     }
-                    if (label) {
-                        strncpy_s(slot.name, label, sizeof(slot.name) - 1);
+
+                    // Derive short label from full name
+                    if (fullName[0]) {
+                        // Map known full names to short labels
+                        // Health potions
+                        if (strstr(fullName, "Minor Heal"))       strncpy_s(slot.name, "HP1", sizeof(slot.name));
+                        else if (strstr(fullName, "Light Heal"))  strncpy_s(slot.name, "HP2", sizeof(slot.name));
+                        else if (strstr(fullName, "Greater Heal"))strncpy_s(slot.name, "HP4", sizeof(slot.name));
+                        else if (strstr(fullName, "Super Heal"))  strncpy_s(slot.name, "HP5", sizeof(slot.name));
+                        else if (strstr(fullName, "Heal"))        strncpy_s(slot.name, "HP3", sizeof(slot.name));
+                        // Mana potions
+                        else if (strstr(fullName, "Minor Mana"))  strncpy_s(slot.name, "MP1", sizeof(slot.name));
+                        else if (strstr(fullName, "Light Mana"))  strncpy_s(slot.name, "MP2", sizeof(slot.name));
+                        else if (strstr(fullName, "Greater Mana"))strncpy_s(slot.name, "MP4", sizeof(slot.name));
+                        else if (strstr(fullName, "Super Mana"))  strncpy_s(slot.name, "MP5", sizeof(slot.name));
+                        else if (strstr(fullName, "Mana"))        strncpy_s(slot.name, "MP3", sizeof(slot.name));
+                        // Rejuv
+                        else if (strstr(fullName, "Full Rejuv"))  strncpy_s(slot.name, "FRJ", sizeof(slot.name));
+                        else if (strstr(fullName, "Rejuv"))       strncpy_s(slot.name, "RJ", sizeof(slot.name));
+                        // Scrolls
+                        else if (strstr(fullName, "Town Portal")) strncpy_s(slot.name, "TP", sizeof(slot.name));
+                        else if (strstr(fullName, "Identify"))    strncpy_s(slot.name, "ID", sizeof(slot.name));
+                        // Utility
+                        else if (strstr(fullName, "Antidote"))    strncpy_s(slot.name, "Antd", sizeof(slot.name));
+                        else if (strstr(fullName, "Thawing"))     strncpy_s(slot.name, "Thaw", sizeof(slot.name));
+                        else if (strstr(fullName, "Stamina"))     strncpy_s(slot.name, "Stam", sizeof(slot.name));
+                        else if (strstr(fullName, "Key"))         strncpy_s(slot.name, "Key", sizeof(slot.name));
+                        // Unknown — use abbreviated full name
+                        else {
+                            strncpy_s(slot.name, fullName, sizeof(slot.name) - 1);
+                            // Truncate to fit button
+                            if (strlen(slot.name) > 8) slot.name[8] = '\0';
+                        }
                     } else {
-                        snprintf(slot.name, sizeof(slot.name), "#%d", code);
+                        snprintf(slot.name, sizeof(slot.name), "#%d", pItem->dwTxtFileNo);
                     }
                 }
             }

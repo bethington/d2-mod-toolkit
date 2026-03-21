@@ -542,15 +542,31 @@ namespace {
                             }
                             if (ImGui::IsItemHovered()) ImGui::SetTooltip("Re-snapshot belt layout");
 
-                            // Show snapshot info
+                            // Show snapshot info using short names from belt
                             auto snap = AutoPickup::GetSnapshot();
                             if (snap.valid) {
+                                // Build a code→name map from current belt items
+                                auto beltForSnap = GameState::GetBeltState();
+                                char snapNames[4][32] = {};
+                                for (int c = 0; c < 4; c++) {
+                                    if (snap.preferredCode[c] == 0) continue;
+                                    // Find a belt item with this code to get its short name
+                                    for (int s = 0; s < 16; s++) {
+                                        if (beltForSnap.slots[s].occupied && beltForSnap.slots[s].itemCode == snap.preferredCode[c]) {
+                                            strncpy_s(snapNames[c], beltForSnap.slots[s].name, sizeof(snapNames[c]));
+                                            break;
+                                        }
+                                    }
+                                    // Fallback to code if no matching belt item found
+                                    if (!snapNames[c][0]) snprintf(snapNames[c], sizeof(snapNames[c]), "#%d", snap.preferredCode[c]);
+                                }
+
                                 ImGui::SameLine();
                                 ImGui::TextColored(cGray, " Snap:");
                                 for (int c = 0; c < 4; c++) {
                                     ImGui::SameLine();
                                     if (snap.preferredCode[c] > 0) {
-                                        ImGui::Text("[%d]", snap.preferredCode[c]);
+                                        ImGui::Text("[%s]", snapNames[c]);
                                     } else {
                                         ImGui::TextColored(cGray, "[--]");
                                     }

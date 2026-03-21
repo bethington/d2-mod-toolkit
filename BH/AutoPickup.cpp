@@ -112,28 +112,35 @@ namespace {
         return count;
     }
 
-    // Check which columns have empty slots (check row 0 = bottom row)
-    // Returns bitmask: bit 0 = col 0 empty, bit 1 = col 1 empty, etc.
+    // Check which columns have any empty slots (across all 4 rows)
+    // Returns bitmask: bit 0 = col 0 has empty slot, bit 1 = col 1 has empty slot, etc.
     int GetEmptyColumns(UnitAny* pPlayer) {
         if (!pPlayer || !pPlayer->pInventory) return 0;
 
-        bool colOccupied[4] = {};
+        // Count items per column
+        int colCount[4] = {};
+        int totalBeltItems = 0;
         UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
         while (pItem) {
             if (pItem->pItemData && pItem->pItemData->NodePage == NODEPAGE_BELTSLOTS) {
+                totalBeltItems++;
                 if (pItem->pPath) {
                     ItemPath* ip = (ItemPath*)pItem->pPath;
                     int slot = (int)ip->dwPosX;
                     int col = slot % 4;
-                    if (col >= 0 && col < 4) colOccupied[col] = true;
+                    if (col >= 0 && col < 4) colCount[col]++;
                 }
             }
             pItem = D2COMMON_GetNextItemFromInventory(pItem);
         }
 
+        // Determine belt rows (4 rows max for war belt)
+        // If total items <= 4, assume at least 1 row available per column
+        int maxRows = 4; // assume max belt
+
         int emptyMask = 0;
         for (int i = 0; i < 4; i++) {
-            if (!colOccupied[i]) emptyMask |= (1 << i);
+            if (colCount[i] < maxRows) emptyMask |= (1 << i);
         }
         return emptyMask;
     }
@@ -291,9 +298,15 @@ namespace AutoPickup {
                         DWORD preferred = g_snapshot.preferredCode[col];
                         if (preferred == 0) continue;
 
+                        // Exact code match — always pick up
+                        if (code == preferred) {
+                            priority = 20;
+                            break;
+                        }
+
+                        // Same category, better tier
                         if (IsAcceptablePickup(code, preferred)) {
-                            // Exact or better match
-                            priority = 10 + GetTier(code); // higher tier = higher priority
+                            priority = 10 + GetTier(code);
                             break;
                         }
 
@@ -304,7 +317,7 @@ namespace AutoPickup {
                             if (remaining <= 1) {
                                 DWORD fallback = GetFallbackCode(preferred);
                                 if (fallback > 0 && code == fallback) {
-                                    priority = 5; // lower priority than exact match
+                                    priority = 5;
                                     break;
                                 }
                             }
