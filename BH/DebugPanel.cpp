@@ -4,6 +4,7 @@
 #include "AutoPotion.h"
 #include "AutoPickup.h"
 #include "HookManager.h"
+#include "CrashCatcher.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -748,8 +749,54 @@ namespace {
                 }
 
                 ImGui::Separator();
-                ImGui::TextColored(cGold2, "Crash/Exception Log:");
-                ImGui::TextColored(cGray2, "  (no exceptions captured)");
+
+                // -- Crash Log --
+                int crashCount = CrashCatcher::GetCrashCount();
+                ImGui::TextColored(crashCount > 0 ? cRed2 : cGold2, "Crashes: %d", crashCount);
+                if (crashCount > 0) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Clear##crash")) CrashCatcher::ClearCrashLog();
+
+                    auto crashes = CrashCatcher::GetCrashLog();
+                    if (ImGui::BeginTable("CrashTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, 150 * g_dpiScale))) {
+                        ImGui::TableSetupColumn("Exception", ImGuiTableColumnFlags_WidthFixed, 120 * g_dpiScale);
+                        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 130 * g_dpiScale);
+                        ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 70 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (int i = (int)crashes.size() - 1; i >= 0; i--) {
+                            auto& c = crashes[i];
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::TextColored(cRed2, "%s", CrashCatcher::GetExceptionName(c.exceptionCode));
+                            ImGui::TableNextColumn();
+                            ImGui::Text("0x%08X", c.exceptionAddress);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%s+0x%X", c.moduleName, c.moduleOffset);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%u", c.threadId);
+
+                            // Tooltip with full details on hover
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::BeginTooltip();
+                                ImGui::Text("EAX=%08X EBX=%08X ECX=%08X EDX=%08X", c.eax, c.ebx, c.ecx, c.edx);
+                                ImGui::Text("ESI=%08X EDI=%08X ESP=%08X EBP=%08X", c.esi, c.edi, c.esp, c.ebp);
+                                ImGui::Text("EIP=%08X EFLAGS=%08X", c.eip, c.eflags);
+                                if (c.exceptionCode == 0xC0000005) {
+                                    ImGui::Text("Fault Address: 0x%08X", c.faultAddress);
+                                }
+                                ImGui::Separator();
+                                ImGui::Text("Stack Trace:");
+                                for (int j = 0; j < c.stackDepth; j++) {
+                                    ImGui::Text("  [%d] 0x%08X", j, c.stackTrace[j]);
+                                }
+                                ImGui::EndTooltip();
+                            }
+                        }
+                        ImGui::EndTable();
+                    }
+                }
 
                 ImGui::EndTabItem();
             }

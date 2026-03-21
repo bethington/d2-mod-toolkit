@@ -9,6 +9,7 @@
 #include "AutoPickup.h"
 #include "HookManager.h"
 #include "GameNav.h"
+#include "CrashCatcher.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -318,6 +319,18 @@ namespace {
                     {"max_entries", {{"type", "integer"}, {"description", "Max entries to return (default 50)"}}},
                     {"address", {{"type", "string"}, {"description", "Filter by hook address (default all)"}}},
                     {"clear", {{"type", "boolean"}, {"description", "Clear the log after reading"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_crash_log"},
+            {"description", "Get captured crash/exception records with registers, stack trace, and module info."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"clear", {{"type", "boolean"}, {"description", "Clear log after reading"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -950,6 +963,48 @@ namespace {
                 {"total_logged", HookManager::GetCallLogSize()},
                 {"entries", entries}
             };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_crash_log") {
+            auto crashes = CrashCatcher::GetCrashLog();
+            if (arguments.value("clear", false)) CrashCatcher::ClearCrashLog();
+
+            json entries = json::array();
+            for (auto& c : crashes) {
+                char addrBuf[16], faultBuf[16];
+                snprintf(addrBuf, sizeof(addrBuf), "0x%08X", c.exceptionAddress);
+                snprintf(faultBuf, sizeof(faultBuf), "0x%08X", c.faultAddress);
+
+                json regs = {
+                    {"eax", c.eax}, {"ebx", c.ebx}, {"ecx", c.ecx}, {"edx", c.edx},
+                    {"esi", c.esi}, {"edi", c.edi}, {"esp", c.esp}, {"ebp", c.ebp},
+                    {"eip", c.eip}, {"eflags", c.eflags}
+                };
+
+                json stack = json::array();
+                for (int i = 0; i < c.stackDepth; i++) {
+                    char sBuf[16]; snprintf(sBuf, sizeof(sBuf), "0x%08X", c.stackTrace[i]);
+                    stack.push_back(sBuf);
+                }
+
+                char offsetBuf[32];
+                snprintf(offsetBuf, sizeof(offsetBuf), "%s+0x%X", c.moduleName, c.moduleOffset);
+
+                entries.push_back({
+                    {"exception", CrashCatcher::GetExceptionName(c.exceptionCode)},
+                    {"code", c.exceptionCode},
+                    {"address", addrBuf},
+                    {"fault_address", faultBuf},
+                    {"module", offsetBuf},
+                    {"thread_id", c.threadId},
+                    {"timestamp", c.timestamp},
+                    {"registers", regs},
+                    {"stack_trace", stack}
+                });
+            }
+
+            json info = {{"count", entries.size()}, {"crashes", entries}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 

@@ -14,6 +14,7 @@
 #include "AutoPotion.h"
 #include "AutoPickup.h"
 #include "HookManager.h"
+#include "CrashCatcher.h"
 
 string BH::path;
 HINSTANCE BH::instance;
@@ -136,7 +137,8 @@ void BH::Initialize()
 		DebugPanel::Init();
 	}
 
-	// Initialize hook manager
+	// Initialize crash catcher and hook manager
+	CrashCatcher::Init();
 	HookManager::Init();
 
 	// Start the MCP HTTP server
@@ -197,6 +199,7 @@ bool BH::Shutdown()
 		oogDraw->Remove();
 	}
 
+	CrashCatcher::Shutdown();
 	HookManager::Shutdown();
 	McpServer::Shutdown();
 	DebugPanel::Shutdown();
