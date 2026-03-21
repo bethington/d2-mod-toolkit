@@ -11,6 +11,7 @@
 #include "GameNav.h"
 #include "CrashCatcher.h"
 #include "PatchManager.h"
+#include "GamePause.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -325,6 +326,24 @@ namespace {
                 }},
                 {"required", json::array()}
             }}
+        });
+
+        tools.push_back({
+            {"name", "pause_game"},
+            {"description", "Pause the game loop. Game freezes but MCP server stays responsive. Use step_game to advance one frame, resume_game to continue."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "resume_game"},
+            {"description", "Resume the game loop after pausing."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "step_game"},
+            {"description", "Advance one game frame while paused, then re-pause. Use to step through game logic frame by frame."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
         tools.push_back({
@@ -1021,6 +1040,34 @@ namespace {
                 {"count", entries.size()},
                 {"total_logged", HookManager::GetCallLogSize()},
                 {"entries", entries}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "pause_game") {
+            GamePause::Pause();
+            json info = {{"paused", true}, {"frame", GamePause::GetFrameCount()}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "resume_game") {
+            GamePause::Resume();
+            json info = {{"paused", false}, {"frame", GamePause::GetFrameCount()}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "step_game") {
+            if (!GamePause::IsPaused()) {
+                GamePause::Pause();
+                Sleep(50); // let the game loop reach the pause point
+            }
+            int frameBefore = GamePause::GetFrameCount();
+            GamePause::Step();
+            Sleep(50); // let the frame execute
+            json info = {
+                {"paused", true},
+                {"frame_before", frameBefore},
+                {"frame_after", GamePause::GetFrameCount()}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }

@@ -5,6 +5,7 @@
 #include "AutoPotion.h"
 #include "AutoPickup.h"
 #include "GameNav.h"
+#include "GamePause.h"
 
 #include <iterator>
 
@@ -25,6 +26,7 @@ void OOGDraw() {
 }
 
 void GameLoop() {
+	GamePause::CheckPause(); // blocks if paused
 	__raise BH::moduleManager->OnLoop();
 	GameState::Update();
 	AutoPotion::Update();

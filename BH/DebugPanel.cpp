@@ -6,6 +6,7 @@
 #include "HookManager.h"
 #include "CrashCatcher.h"
 #include "PatchManager.h"
+#include "GamePause.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -257,6 +258,19 @@ namespace {
                     "MCP: :%d (%d reqs)", McpServer::GetPort(), McpServer::GetRequestCount());
             } else {
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "MCP: offline");
+            }
+
+            ImGui::Separator();
+            if (GamePause::IsPaused()) {
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.2f, 1.0f), "PAUSED (F%d)", GamePause::GetFrameCount());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Resume")) GamePause::Resume();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Step")) GamePause::Step();
+            } else {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "F%d", GamePause::GetFrameCount());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Pause")) GamePause::Pause();
             }
             ImGui::EndMenuBar();
         }
