@@ -105,9 +105,10 @@ namespace GameState {
         int charClassNum = 0;       // raw class number from BnData
 
         // XP
-        int currentXp = 0;         // STAT_EXP (may overflow for high levels)
-        int nextLevelXp = 0;       // STAT_NEXTEXPERIENCE
-        float xpPctToNext = 0;     // percentage to next level
+        unsigned int currentXp = 0;   // STAT_EXP
+        unsigned int lastLevelXp = 0; // STAT_LASTEXPERIENCE
+        unsigned int nextLevelXp = 0; // STAT_NEXTEXPERIENCE
+        float xpPctToNext = 0;        // percentage to next level
 
         // Area
         char areaName[64] = {};

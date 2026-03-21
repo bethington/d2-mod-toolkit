@@ -235,17 +235,56 @@ namespace {
         ps.mf = GS(STAT_MAGICFIND);
         ps.gf = GS(STAT_GOLDFIND);
 
-        // XP
-        ps.currentXp = GS(STAT_EXP);
-        ps.nextLevelXp = GS(STAT_NEXTEXPERIENCE);
-        if (ps.nextLevelXp > 0 && ps.currentXp > 0) {
-            // STAT_NEXTEXPERIENCE gives XP needed FOR next level (total)
-            // STAT_LASTEXPERIENCE would give previous level total
-            // For percentage: (current - lastLevelXp) / (nextLevelXp - lastLevelXp) * 100
-            int lastLevelXp = D2COMMON_GetUnitStat(pPlayer, STAT_LASTEXPERIENCE, 0);
-            if (ps.nextLevelXp > lastLevelXp) {
-                ps.xpPctToNext = (float)(ps.currentXp - lastLevelXp) / (float)(ps.nextLevelXp - lastLevelXp) * 100.0f;
+        // XP — use hardcoded XP table since STAT_LASTEXPERIENCE/STAT_NEXTEXPERIENCE return 0
+        static const unsigned int xpTable[100] = {
+            0, 0, 500, 1500, 3750, 7875, 14175, 22680, 32886, 44396,          // 0-9
+            57715, 72144, 90180, 112725, 140906, 176132, 220165, 275207,       // 10-17
+            344008, 430010, 537513, 671891, 839864, 1049830, 1312287,          // 18-24
+            1640359, 2050449, 2563061, 3203826, 3902260, 4663553, 5493363,    // 25-31
+            6397855, 7383752, 8458379, 9629723, 10906488, 12298162,           // 32-37
+            13815086, 15468534, 17270791, 19235252, 21376515, 23710491,       // 38-43
+            26254525, 29027522, 32050088, 35344686, 38935798, 42850109,       // 44-49
+            47116709, 51767302, 56836449, 62361819, 68384473, 74949165,       // 50-55
+            82104680, 89904191, 98405658, 107672256, 117772849, 128782495,    // 56-61
+            140783010, 153863570, 168121381, 183662396, 200602101, 219066380, // 62-67
+            239192444, 261129853, 285041630, 311105466, 339515048, 370481492, // 68-73
+            404234327, 441026474, 481136442, 524872354, 572575690, 624623834, // 74-79
+            681432048, 743456075, 811194541, 885201999, 966088518,            // 80-84
+            1054524008, 1151248897, 1257084257, 1372942669, 1499831554,      // 85-89
+            1638858934, 1791246578, 1958345166, 2141652315, 2342826386,      // 90-94
+            2563823926U, 2806940593U, 3074784946U, 3370426858U, 3696930036U  // 95-99
+        };
+
+        // PD2 may have a modified XP curve, so use ratio-based approach:
+        // Find the two table entries that bracket our current XP
+        ps.currentXp = (unsigned int)GS(STAT_EXP);
+        if (ps.level >= 1 && ps.level <= 98) {
+            // Use actual level boundaries from table
+            ps.lastLevelXp = xpTable[ps.level];
+            ps.nextLevelXp = xpTable[ps.level + 1];
+
+            // If XP table doesn't match PD2's curve, find where current XP falls
+            // by scanning the table for the correct bracket
+            if (ps.currentXp < ps.lastLevelXp) {
+                // PD2 modified XP curve — find correct bracket
+                for (int i = 1; i < 99; i++) {
+                    if (ps.currentXp >= xpTable[i] && ps.currentXp < xpTable[i + 1]) {
+                        ps.lastLevelXp = xpTable[i];
+                        ps.nextLevelXp = xpTable[i + 1];
+                        break;
+                    }
+                }
             }
+
+            if (ps.nextLevelXp > ps.lastLevelXp && ps.currentXp >= ps.lastLevelXp) {
+                double progress = (double)(ps.currentXp - ps.lastLevelXp);
+                double range = (double)(ps.nextLevelXp - ps.lastLevelXp);
+                ps.xpPctToNext = (float)(progress / range * 100.0);
+            }
+        } else if (ps.level == 99) {
+            ps.lastLevelXp = xpTable[99];
+            ps.nextLevelXp = xpTable[99];
+            ps.xpPctToNext = 100.0f;
         }
 
         #undef GS
@@ -354,7 +393,8 @@ namespace {
                         case 515: label = "Antd"; break; // Antidote
                         case 516: label = "Thaw"; break; // Thawing
                         case 519: label = "Stam"; break; // Stamina
-                        // Scrolls
+                        // Keys & Scrolls
+                        case 528: label = "Key"; break;  // Key (for locked chests)
                         case 529: label = "TP";  break;  // Town Portal
                         case 530: label = "ID";  break;  // Identify
                         // Alternate PD2 codes (older seasons / funmixxed)
