@@ -204,7 +204,9 @@ namespace {
                     {"max_distance", {{"type", "integer"}, {"description", "Max pickup range in game units (1-40)"}}},
                     {"pick_hp_potions", {{"type", "boolean"}}},
                     {"pick_mp_potions", {{"type", "boolean"}}},
-                    {"pick_rejuvs", {{"type", "boolean"}}}
+                    {"pick_rejuvs", {{"type", "boolean"}}},
+                    {"pick_tp_scrolls", {{"type", "boolean"}, {"description", "Pick up TP scrolls when tome not full"}}},
+                    {"pick_id_scrolls", {{"type", "boolean"}, {"description", "Pick up ID scrolls when tome not full"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -572,7 +574,9 @@ namespace {
                 {"cooldown_ms", cfg.cooldownMs},
                 {"pick_hp_potions", cfg.pickHpPotions},
                 {"pick_mp_potions", cfg.pickMpPotions},
-                {"pick_rejuvs", cfg.pickRejuvs}
+                {"pick_rejuvs", cfg.pickRejuvs},
+                {"pick_tp_scrolls", cfg.pickTpScrolls},
+                {"pick_id_scrolls", cfg.pickIdScrolls}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
@@ -585,6 +589,8 @@ namespace {
             if (arguments.contains("pick_hp_potions")) cfg.pickHpPotions = arguments["pick_hp_potions"].get<bool>();
             if (arguments.contains("pick_mp_potions")) cfg.pickMpPotions = arguments["pick_mp_potions"].get<bool>();
             if (arguments.contains("pick_rejuvs")) cfg.pickRejuvs = arguments["pick_rejuvs"].get<bool>();
+            if (arguments.contains("pick_tp_scrolls")) cfg.pickTpScrolls = arguments["pick_tp_scrolls"].get<bool>();
+            if (arguments.contains("pick_id_scrolls")) cfg.pickIdScrolls = arguments["pick_id_scrolls"].get<bool>();
             AutoPickup::SetConfig(cfg);
 
             json info = {
@@ -593,7 +599,9 @@ namespace {
                 {"max_distance", cfg.maxDistance},
                 {"pick_hp_potions", cfg.pickHpPotions},
                 {"pick_mp_potions", cfg.pickMpPotions},
-                {"pick_rejuvs", cfg.pickRejuvs}
+                {"pick_rejuvs", cfg.pickRejuvs},
+                {"pick_tp_scrolls", cfg.pickTpScrolls},
+                {"pick_id_scrolls", cfg.pickIdScrolls}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }

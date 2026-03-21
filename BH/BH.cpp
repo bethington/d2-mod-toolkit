@@ -159,6 +159,8 @@ void BH::Initialize()
 		auc.pickHpPotions = App.autoPickup.pickHpPotions.value;
 		auc.pickMpPotions = App.autoPickup.pickMpPotions.value;
 		auc.pickRejuvs = App.autoPickup.pickRejuvs.value;
+		auc.pickTpScrolls = App.autoPickup.pickTpScrolls.value;
+		auc.pickIdScrolls = App.autoPickup.pickIdScrolls.value;
 		AutoPickup::SetConfig(auc);
 	}
 

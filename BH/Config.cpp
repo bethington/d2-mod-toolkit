@@ -304,6 +304,8 @@ void Config::SaveConfig()
 	jsonAutoPickup["pick_hp_potions"] = App.autoPickup.pickHpPotions.value;
 	jsonAutoPickup["pick_mp_potions"] = App.autoPickup.pickMpPotions.value;
 	jsonAutoPickup["pick_rejuvs"] = App.autoPickup.pickRejuvs.value;
+	jsonAutoPickup["pick_tp_scrolls"] = App.autoPickup.pickTpScrolls.value;
+	jsonAutoPickup["pick_id_scrolls"] = App.autoPickup.pickIdScrolls.value;
 	App.jsonConfig["auto_pickup"] = jsonAutoPickup;
 
 	std::ofstream fout(App.jsonFile);
@@ -471,6 +473,8 @@ void Config::LoadConfig()
 	App.autoPickup.pickHpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_hp_potions", App.autoPickup.pickHpPotions);
 	App.autoPickup.pickMpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_mp_potions", App.autoPickup.pickMpPotions);
 	App.autoPickup.pickRejuvs.value = GetBool("/auto_pickup"_json_pointer, "pick_rejuvs", App.autoPickup.pickRejuvs);
+	App.autoPickup.pickTpScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_tp_scrolls", App.autoPickup.pickTpScrolls);
+	App.autoPickup.pickIdScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_id_scrolls", App.autoPickup.pickIdScrolls);
 
 	if (bCreateFile)
 	{

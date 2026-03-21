@@ -94,6 +94,8 @@ struct BHApp
 		SettingsBool pickHpPotions = { true, true };
 		SettingsBool pickMpPotions = { true, true };
 		SettingsBool pickRejuvs = { true, true };
+		SettingsBool pickTpScrolls = { true, true };
+		SettingsBool pickIdScrolls = { true, true };
 	} autoPickup;
 
 	struct

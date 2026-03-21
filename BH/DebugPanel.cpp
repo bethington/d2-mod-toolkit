@@ -530,6 +530,10 @@ namespace {
                             if (ImGui::Checkbox("MP##pickMP", &auc.pickMpPotions)) changed = true;
                             ImGui::SameLine();
                             if (ImGui::Checkbox("Rejuv##pickRJ", &auc.pickRejuvs)) changed = true;
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("TP##pickTP", &auc.pickTpScrolls)) changed = true;
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("ID##pickID", &auc.pickIdScrolls)) changed = true;
                         }
 
                         if (changed) {
