@@ -4,6 +4,7 @@
 #include "GameState.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "GameNav.h"
 
 #include <iterator>
 
@@ -44,6 +45,7 @@ DWORD WINAPI GameThread(VOID* lpvoid) {
 			__raise BH::moduleManager->OnGameJoin();
 			BH::oogDraw->Remove();
 		}
+		GameNav::Update();
 		Sleep(10);
 	}
 }

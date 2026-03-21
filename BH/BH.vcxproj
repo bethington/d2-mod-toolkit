@@ -155,6 +155,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AutoPickup.cpp" />
+    <ClCompile Include="GameNav.cpp" />
     <ClCompile Include="HookManager.cpp" />
     <ClCompile Include="AutoPotion.cpp" />
     <ClCompile Include="DebugPanel.cpp" />
@@ -210,6 +211,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AutoPickup.h" />
+    <ClInclude Include="GameNav.h" />
     <ClInclude Include="HookManager.h" />
     <ClInclude Include="AutoPotion.h" />
     <ClInclude Include="DebugPanel.h" />

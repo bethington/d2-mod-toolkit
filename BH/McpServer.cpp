@@ -8,6 +8,7 @@
 #include "AutoPotion.h"
 #include "AutoPickup.h"
 #include "HookManager.h"
+#include "GameNav.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -240,6 +241,25 @@ namespace {
         tools.push_back({
             {"name", "exit_game"},
             {"description", "Gracefully exit the current game (save and return to menu). Does nothing if not in-game."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "enter_game"},
+            {"description", "Navigate menus to enter a game. Automates: Main Menu -> Character Select -> Difficulty -> In Game."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"character", {{"type", "string"}, {"description", "Character name to select (default: use currently selected)"}}},
+                    {"difficulty", {{"type", "integer"}, {"description", "0=Normal, 1=Nightmare, 2=Hell, -1=highest available (default)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_nav_status"},
+            {"description", "Get the current status of menu navigation (enter_game progress)."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
@@ -747,6 +767,30 @@ namespace {
             }
             D2CLIENT_ExitGame();
             return {{"content", {{{"type", "text"}, {"text", "Exit game initiated — saving and returning to menu"}}}}};
+        }
+
+        if (name == "enter_game") {
+            std::string charName = arguments.value("character", "");
+            int difficulty = arguments.value("difficulty", -1);
+            GameNav::EnterGame(charName, difficulty);
+            json info = {
+                {"status", "navigation_started"},
+                {"character", charName.empty() ? "default" : charName},
+                {"difficulty", difficulty == -1 ? "highest" : std::to_string(difficulty)}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_nav_status") {
+            auto status = GameNav::GetStatus();
+            const char* stateNames[] = {"idle", "in_progress", "success", "failed"};
+            json info = {
+                {"state", stateNames[status.state]},
+                {"screen", status.currentScreen},
+                {"message", status.message},
+                {"step", status.step}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "install_hook") {
