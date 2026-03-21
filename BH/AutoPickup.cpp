@@ -2,6 +2,7 @@
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
+#include "BH.h"
 
 #include <mutex>
 #include <cmath>
@@ -173,20 +174,40 @@ namespace {
     }
 
     // ---- Scroll/Tome Logic ----
+    // Use game name lookup instead of hardcoded codes since PD2 remaps item IDs.
 
-    bool IsTpScroll(DWORD code) { return code == 529; }
-    bool IsIdScroll(DWORD code) { return code == 530; }
-    bool IsTpTome(DWORD code) { return code == 518 || code == 520; }
-    bool IsIdTome(DWORD code) { return code == 519 || code == 521; }
     static const int MAX_TOME_CHARGES = 20;
 
+    // Check if an item is a scroll/tome by looking up its game name
+    bool IsItemByName(UnitAny* pItem, const char* nameFragment) {
+        if (!pItem) return false;
+        try {
+            wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+            if (wName) {
+                char name[64] = {};
+                WideCharToMultiByte(CP_UTF8, 0, wName, -1, name, sizeof(name) - 1, nullptr, nullptr);
+                return strstr(name, nameFragment) != nullptr;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    // Check if a ground item is a TP or ID scroll
+    bool IsTpScrollUnit(UnitAny* pItem) { return IsItemByName(pItem, "Town Portal"); }
+    bool IsIdScrollUnit(UnitAny* pItem) { return IsItemByName(pItem, "Identify"); }
+
+    // Find a tome in inventory and return its charge count
+    // Uses name matching: "Tome of Town Portal" or "Tome of Identify"
     int GetTomeCharges(UnitAny* pPlayer, bool isTp) {
         if (!pPlayer || !pPlayer->pInventory) return -1;
+        const char* tomeName = isTp ? "Town Portal" : "Identify";
+
         UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
         while (pItem) {
             if (pItem->pItemData) {
-                DWORD code = pItem->dwTxtFileNo;
-                if ((isTp && IsTpTome(code)) || (!isTp && IsIdTome(code))) {
+                // Tomes are in inventory (NODEPAGE_STORAGE) and have "Tome" in their name
+                // But we also need to check the name to distinguish TP from ID
+                if (IsItemByName(pItem, "Tome") && IsItemByName(pItem, tomeName)) {
                     return D2COMMON_GetUnitStat(pItem, STAT_AMMOQUANTITY, 0);
                 }
             }
@@ -228,11 +249,7 @@ namespace AutoPickup {
         if (!pPlayer || !pPlayer->pPath || !pPlayer->pAct || !pPlayer->pInventory) return;
         if (pPlayer->pInventory->pCursorItem) return;
 
-        // Auto-snapshot on first enable
-        if (!g_wasEnabled) {
-            TakeSnapshot(pPlayer);
-            g_wasEnabled = true;
-        }
+        g_wasEnabled = true;
 
         // Cooldown
         DWORD now = GetTickCount();
@@ -252,7 +269,7 @@ namespace AutoPickup {
 
         // Check which belt columns need refill
         int emptyMask = GetEmptyColumns(pPlayer);
-        bool needBeltRefill = (emptyMask != 0) && g_snapshot.valid;
+        bool needBeltRefill = (emptyMask != 0);
         bool needScrolls = g_needTpScrolls || g_needIdScrolls;
 
         if (!needBeltRefill && !needScrolls) return;
@@ -288,15 +305,29 @@ namespace AutoPickup {
                 int priority = 0;
 
                 // Check scrolls first (they go to inventory, not belt)
-                if (g_needTpScrolls && IsTpScroll(code)) { priority = 1; }
-                else if (g_needIdScrolls && IsIdScroll(code)) { priority = 1; }
+                // Use name-based detection since PD2 remaps item codes
+                if (g_needTpScrolls && IsTpScrollUnit(pUnit)) { priority = 1; }
+                else if (g_needIdScrolls && IsIdScrollUnit(pUnit)) { priority = 1; }
                 // Check belt refill
-                else if (needBeltRefill && g_snapshot.valid) {
+                else if (needBeltRefill) {
+                    // Only pick up potions/consumables, not random items
+                    PotionCategory groundCat = GetCategory(code);
+                    bool isConsumable = (groundCat != CAT_NONE) || IsItemByName(pUnit, "Potion") || IsItemByName(pUnit, "Rejuv");
+
+                    if (!isConsumable) {} // skip non-consumables
+                    else {
                     // Find which empty column this item could fill
                     for (int col = 0; col < 4; col++) {
                         if (!(emptyMask & (1 << col))) continue;
-                        DWORD preferred = g_snapshot.preferredCode[col];
-                        if (preferred == 0) continue;
+
+                        DWORD preferred = 0;
+                        if (g_snapshot.valid) preferred = g_snapshot.preferredCode[col];
+
+                        if (preferred == 0) {
+                            // No preference for this column — accept any potion
+                            priority = 2;
+                            break;
+                        }
 
                         // Exact code match — always pick up
                         if (code == preferred) {
@@ -323,6 +354,7 @@ namespace AutoPickup {
                             }
                         }
                     }
+                    } // else (isConsumable)
                 }
 
                 if (priority > 0 && (priority > bestPriority || (priority == bestPriority && dist < bestDist))) {
@@ -353,8 +385,19 @@ namespace AutoPickup {
         return g_snapshot;
     }
 
+    void SetSnapshot(const BeltSnapshot& snap) {
+        g_snapshot = snap;
+    }
+
     void ResnapBelt() {
         UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
-        if (pPlayer) TakeSnapshot(pPlayer);
+        if (pPlayer) {
+            TakeSnapshot(pPlayer);
+            // Save snapshot to App config for persistence
+            App.autoPickup.snapCol0.value = g_snapshot.preferredCode[0];
+            App.autoPickup.snapCol1.value = g_snapshot.preferredCode[1];
+            App.autoPickup.snapCol2.value = g_snapshot.preferredCode[2];
+            App.autoPickup.snapCol3.value = g_snapshot.preferredCode[3];
+        }
     }
 }

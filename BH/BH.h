@@ -93,6 +93,10 @@ struct BHApp
 		SettingsInt cooldownMs = { 250, 250, 100, 5000 };
 		SettingsBool pickTpScrolls = { true, true };
 		SettingsBool pickIdScrolls = { true, true };
+		SettingsInt snapCol0 = { 0, 0, 0, 99999 };
+		SettingsInt snapCol1 = { 0, 0, 0, 99999 };
+		SettingsInt snapCol2 = { 0, 0, 0, 99999 };
+		SettingsInt snapCol3 = { 0, 0, 0, 99999 };
 	} autoPickup;
 
 	struct

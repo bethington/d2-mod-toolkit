@@ -159,6 +159,16 @@ void BH::Initialize()
 		auc.pickTpScrolls = App.autoPickup.pickTpScrolls.value;
 		auc.pickIdScrolls = App.autoPickup.pickIdScrolls.value;
 		AutoPickup::SetConfig(auc);
+
+		// Restore belt snapshot from config
+		AutoPickup::BeltSnapshot snap;
+		snap.preferredCode[0] = App.autoPickup.snapCol0.value;
+		snap.preferredCode[1] = App.autoPickup.snapCol1.value;
+		snap.preferredCode[2] = App.autoPickup.snapCol2.value;
+		snap.preferredCode[3] = App.autoPickup.snapCol3.value;
+		snap.valid = (snap.preferredCode[0] || snap.preferredCode[1] ||
+		              snap.preferredCode[2] || snap.preferredCode[3]);
+		AutoPickup::SetSnapshot(snap);
 	}
 
 	initialized = true;

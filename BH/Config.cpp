@@ -303,6 +303,11 @@ void Config::SaveConfig()
 	jsonAutoPickup["cooldown_ms"] = App.autoPickup.cooldownMs.value;
 	jsonAutoPickup["pick_tp_scrolls"] = App.autoPickup.pickTpScrolls.value;
 	jsonAutoPickup["pick_id_scrolls"] = App.autoPickup.pickIdScrolls.value;
+	jsonAutoPickup["snap_col_0"] = App.autoPickup.snapCol0.value;
+	jsonAutoPickup["snap_col_1"] = App.autoPickup.snapCol1.value;
+	jsonAutoPickup["snap_col_2"] = App.autoPickup.snapCol2.value;
+	jsonAutoPickup["snap_col_3"] = App.autoPickup.snapCol3.value;
+	jsonAutoPickup["pick_id_scrolls"] = App.autoPickup.pickIdScrolls.value;
 	App.jsonConfig["auto_pickup"] = jsonAutoPickup;
 
 	std::ofstream fout(App.jsonFile);
@@ -468,6 +473,11 @@ void Config::LoadConfig()
 	App.autoPickup.maxDistance.value = GetInt("/auto_pickup"_json_pointer, "max_distance", App.autoPickup.maxDistance);
 	App.autoPickup.cooldownMs.value = GetInt("/auto_pickup"_json_pointer, "cooldown_ms", App.autoPickup.cooldownMs);
 	App.autoPickup.pickTpScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_tp_scrolls", App.autoPickup.pickTpScrolls);
+	App.autoPickup.pickIdScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_id_scrolls", App.autoPickup.pickIdScrolls);
+	App.autoPickup.snapCol0.value = GetInt("/auto_pickup"_json_pointer, "snap_col_0", App.autoPickup.snapCol0);
+	App.autoPickup.snapCol1.value = GetInt("/auto_pickup"_json_pointer, "snap_col_1", App.autoPickup.snapCol1);
+	App.autoPickup.snapCol2.value = GetInt("/auto_pickup"_json_pointer, "snap_col_2", App.autoPickup.snapCol2);
+	App.autoPickup.snapCol3.value = GetInt("/auto_pickup"_json_pointer, "snap_col_3", App.autoPickup.snapCol3);
 	App.autoPickup.pickIdScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_id_scrolls", App.autoPickup.pickIdScrolls);
 
 	if (bCreateFile)

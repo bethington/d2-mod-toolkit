@@ -32,19 +32,28 @@ namespace {
         D2NET_SendPacket(13, 1, packet);
     }
 
-    // Find the best potion of a given type in the belt
-    // potionCodes: array of item codes to search (best first)
-    // Returns the first matching belt item found
-    UnitAny* FindBeltPotion(UnitAny* pPlayer, const DWORD* potionCodes, int numCodes) {
+    // Get item name from game data tables (cached per call)
+    bool ItemNameContains(UnitAny* pItem, const char* fragment) {
+        if (!pItem) return false;
+        try {
+            wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+            if (wName) {
+                char name[64] = {};
+                WideCharToMultiByte(CP_UTF8, 0, wName, -1, name, sizeof(name) - 1, nullptr, nullptr);
+                return strstr(name, fragment) != nullptr;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    // Find a belt potion by name fragment (e.g., "Healing", "Mana", "Rejuv")
+    UnitAny* FindBeltPotionByName(UnitAny* pPlayer, const char* nameFragment) {
         if (!pPlayer || !pPlayer->pInventory) return nullptr;
 
         UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
         while (pItem) {
             if (pItem->pItemData && pItem->pItemData->NodePage == NODEPAGE_BELTSLOTS) {
-                DWORD code = pItem->dwTxtFileNo;
-                for (int i = 0; i < numCodes; i++) {
-                    if (code == potionCodes[i]) return pItem;
-                }
+                if (ItemNameContains(pItem, nameFragment)) return pItem;
             }
             pItem = D2COMMON_GetNextItemFromInventory(pItem);
         }
@@ -91,15 +100,16 @@ namespace AutoPotion {
         DWORD now = GetTickCount();
 
         // Rejuv — critical health, highest priority
+        // Rejuvs are instant (no active state to check), just use cooldown
         if (cfg.rejuvThreshold > 0 && hpPct <= cfg.rejuvThreshold) {
             if (now - g_lastRejuvTime >= (DWORD)cfg.cooldownMs) {
-                // PD2-S12 rejuv codes: 518=Full Rejuv, 517=Rejuv, 531=PD2 Full Rejuv
-                DWORD rejuvCodes[] = { 531, 518, 517 };
-                UnitAny* pot = FindBeltPotion(pPlayer, rejuvCodes, 3);
+                // Prefer Full Rejuv, fallback to regular Rejuv
+                UnitAny* pot = FindBeltPotionByName(pPlayer, "Full Rejuv");
+                if (!pot) pot = FindBeltPotionByName(pPlayer, "Rejuv");
                 if (pot) {
                     UseBeltItem(pot);
                     g_lastRejuvTime = now;
-                    return; // used a potion this frame, don't stack
+                    return;
                 }
             }
         }
@@ -107,12 +117,8 @@ namespace AutoPotion {
         // HP potion
         if (cfg.hpThreshold > 0 && hpPct <= cfg.hpThreshold) {
             if (now - g_lastHpPotTime >= (DWORD)cfg.cooldownMs) {
-                // Don't drink if health pot is already active
                 if (!D2COMMON_GetUnitState(pPlayer, AFFECT_HEALTHPOT)) {
-                    // PD2-S12 HP codes: 606=Super, 605=Greater, 604=Healing, 603=Light, 602=Minor
-                    // Also older PD2: 593, 592, 591, 590, 589
-                    DWORD hpCodes[] = { 606, 605, 604, 603, 602, 593, 592, 591, 590, 589 };
-                    UnitAny* pot = FindBeltPotion(pPlayer, hpCodes, 10);
+                    UnitAny* pot = FindBeltPotionByName(pPlayer, "Healing");
                     if (pot) {
                         UseBeltItem(pot);
                         g_lastHpPotTime = now;
@@ -126,10 +132,7 @@ namespace AutoPotion {
         if (cfg.mpThreshold > 0 && mpPct <= cfg.mpThreshold) {
             if (now - g_lastMpPotTime >= (DWORD)cfg.cooldownMs) {
                 if (!D2COMMON_GetUnitState(pPlayer, AFFECT_MANAPOT)) {
-                    // PD2-S12 MP codes: 611=Super, 610=Greater, 609=Mana, 608=Light, 607=Minor
-                    // Also older PD2: 598, 597, 596, 595, 594
-                    DWORD mpCodes[] = { 611, 610, 609, 608, 607, 598, 597, 596, 595, 594 };
-                    UnitAny* pot = FindBeltPotion(pPlayer, mpCodes, 10);
+                    UnitAny* pot = FindBeltPotionByName(pPlayer, "Mana");
                     if (pot) {
                         UseBeltItem(pot);
                         g_lastMpPotTime = now;

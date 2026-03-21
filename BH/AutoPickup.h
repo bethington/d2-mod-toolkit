@@ -27,8 +27,9 @@ namespace AutoPickup {
     Config GetConfig();
     void SetConfig(const Config& cfg);
 
-    // Get current belt snapshot (for display)
+    // Get/set belt snapshot
     BeltSnapshot GetSnapshot();
+    void SetSnapshot(const BeltSnapshot& snap);
 
     // Force re-snapshot of current belt layout
     void ResnapBelt();
