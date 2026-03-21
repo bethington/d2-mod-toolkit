@@ -286,6 +286,16 @@ void Config::SaveConfig()
 	jsonDebugPanel["mcp_port"] = App.debugPanel.mcpPort.value;
 	App.jsonConfig["debug_panel"] = jsonDebugPanel;
 
+	// Auto-potion settings
+	json jsonAutoPotion;
+	jsonAutoPotion["enabled"] = App.autoPotion.enabled.value;
+	jsonAutoPotion["hp_threshold"] = App.autoPotion.hpThreshold.value;
+	jsonAutoPotion["mp_threshold"] = App.autoPotion.mpThreshold.value;
+	jsonAutoPotion["rejuv_threshold"] = App.autoPotion.rejuvThreshold.value;
+	jsonAutoPotion["cooldown_ms"] = App.autoPotion.cooldownMs.value;
+	jsonAutoPotion["skip_in_town"] = App.autoPotion.skipInTown.value;
+	App.jsonConfig["auto_potion"] = jsonAutoPotion;
+
 	std::ofstream fout(App.jsonFile);
 	fout << std::setw(4) << App.jsonConfig << std::endl;
 	fout.close();
@@ -435,6 +445,14 @@ void Config::LoadConfig()
 	App.debugPanel.height.value = GetInt("/debug_panel"_json_pointer, "height", App.debugPanel.height);
 	App.debugPanel.dpiPreset.value = GetInt("/debug_panel"_json_pointer, "dpi_preset", App.debugPanel.dpiPreset);
 	App.debugPanel.mcpPort.value = GetInt("/debug_panel"_json_pointer, "mcp_port", App.debugPanel.mcpPort);
+
+	// Auto-potion settings
+	App.autoPotion.enabled.value = GetBool("/auto_potion"_json_pointer, "enabled", App.autoPotion.enabled);
+	App.autoPotion.hpThreshold.value = GetInt("/auto_potion"_json_pointer, "hp_threshold", App.autoPotion.hpThreshold);
+	App.autoPotion.mpThreshold.value = GetInt("/auto_potion"_json_pointer, "mp_threshold", App.autoPotion.mpThreshold);
+	App.autoPotion.rejuvThreshold.value = GetInt("/auto_potion"_json_pointer, "rejuv_threshold", App.autoPotion.rejuvThreshold);
+	App.autoPotion.cooldownMs.value = GetInt("/auto_potion"_json_pointer, "cooldown_ms", App.autoPotion.cooldownMs);
+	App.autoPotion.skipInTown.value = GetBool("/auto_potion"_json_pointer, "skip_in_town", App.autoPotion.skipInTown);
 
 	if (bCreateFile)
 	{

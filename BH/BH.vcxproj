@@ -154,6 +154,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AutoPotion.cpp" />
     <ClCompile Include="DebugPanel.cpp" />
     <ClCompile Include="GameState.cpp" />
     <ClCompile Include="McpServer.cpp" />
@@ -206,6 +207,7 @@
     <ClCompile Include="Task.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AutoPotion.h" />
     <ClInclude Include="DebugPanel.h" />
     <ClInclude Include="GameState.h" />
     <ClInclude Include="McpServer.h" />

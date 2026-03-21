@@ -78,6 +78,16 @@ struct BHApp
 
 	struct
 	{
+		SettingsBool enabled = { false, false };
+		SettingsInt hpThreshold = { 50, 50, 0, 100 };
+		SettingsInt mpThreshold = { 30, 30, 0, 100 };
+		SettingsInt rejuvThreshold = { 25, 25, 0, 100 };
+		SettingsInt cooldownMs = { 500, 500, 100, 5000 };
+		SettingsBool skipInTown = { true, true };
+	} autoPotion;
+
+	struct
+	{
 		SettingsBool autofillLastGame = { true, true };
 		SettingsBool autofillNextGame = { true, true };
 		SettingsBool autofillLastPass = { true, true };

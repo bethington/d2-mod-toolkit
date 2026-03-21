@@ -11,6 +11,7 @@
 #include "Drawing/Stats/StatsDisplay.h"
 #include "DebugPanel.h"
 #include "McpServer.h"
+#include "AutoPotion.h"
 
 string BH::path;
 HINSTANCE BH::instance;
@@ -135,6 +136,18 @@ void BH::Initialize()
 
 	// Start the MCP HTTP server
 	McpServer::Init(App.debugPanel.mcpPort.value);
+
+	// Initialize auto-potion from config
+	{
+		AutoPotion::Config apc;
+		apc.enabled = App.autoPotion.enabled.value;
+		apc.hpThreshold = App.autoPotion.hpThreshold.value;
+		apc.mpThreshold = App.autoPotion.mpThreshold.value;
+		apc.rejuvThreshold = App.autoPotion.rejuvThreshold.value;
+		apc.cooldownMs = App.autoPotion.cooldownMs.value;
+		apc.skipInTown = App.autoPotion.skipInTown.value;
+		AutoPotion::SetConfig(apc);
+	}
 
 	initialized = true;
 }

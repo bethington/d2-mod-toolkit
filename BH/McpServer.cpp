@@ -5,6 +5,7 @@
 #define CPPHTTPLIB_NO_EXCEPTIONS
 #include "McpServer.h"
 #include "GameState.h"
+#include "AutoPotion.h"
 
 #include <windows.h>
 #include <thread>
@@ -154,6 +155,33 @@ namespace {
                         {"type", "integer"},
                         {"description", "Maximum distance from player (default 40)"}
                     }}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_auto_potion"},
+            {"description", "Get auto-potion configuration and status."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "set_auto_potion"},
+            {"description", "Configure auto-potion settings. Pass only the fields you want to change."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"enabled", {{"type", "boolean"}, {"description", "Enable/disable auto-potion"}}},
+                    {"hp_threshold", {{"type", "integer"}, {"description", "HP % to trigger health potion (0-100)"}}},
+                    {"mp_threshold", {{"type", "integer"}, {"description", "Mana % to trigger mana potion (0-100)"}}},
+                    {"rejuv_threshold", {{"type", "integer"}, {"description", "HP % to trigger rejuv (0-100, 0=disabled)"}}},
+                    {"cooldown_ms", {{"type", "integer"}, {"description", "Minimum ms between potions (100-5000)"}}},
+                    {"skip_in_town", {{"type", "boolean"}, {"description", "Skip auto-potion in town areas"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -476,6 +504,41 @@ namespace {
                     {"text", info.dump(2)}
                 }}}
             };
+        }
+
+        if (name == "get_auto_potion") {
+            auto cfg = AutoPotion::GetConfig();
+            json info = {
+                {"enabled", cfg.enabled},
+                {"hp_threshold", cfg.hpThreshold},
+                {"mp_threshold", cfg.mpThreshold},
+                {"rejuv_threshold", cfg.rejuvThreshold},
+                {"cooldown_ms", cfg.cooldownMs},
+                {"skip_in_town", cfg.skipInTown}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "set_auto_potion") {
+            auto cfg = AutoPotion::GetConfig();
+            if (arguments.contains("enabled")) cfg.enabled = arguments["enabled"].get<bool>();
+            if (arguments.contains("hp_threshold")) cfg.hpThreshold = arguments["hp_threshold"].get<int>();
+            if (arguments.contains("mp_threshold")) cfg.mpThreshold = arguments["mp_threshold"].get<int>();
+            if (arguments.contains("rejuv_threshold")) cfg.rejuvThreshold = arguments["rejuv_threshold"].get<int>();
+            if (arguments.contains("cooldown_ms")) cfg.cooldownMs = arguments["cooldown_ms"].get<int>();
+            if (arguments.contains("skip_in_town")) cfg.skipInTown = arguments["skip_in_town"].get<bool>();
+            AutoPotion::SetConfig(cfg);
+
+            json info = {
+                {"status", "updated"},
+                {"enabled", cfg.enabled},
+                {"hp_threshold", cfg.hpThreshold},
+                {"mp_threshold", cfg.mpThreshold},
+                {"rejuv_threshold", cfg.rejuvThreshold},
+                {"cooldown_ms", cfg.cooldownMs},
+                {"skip_in_town", cfg.skipInTown}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "read_memory") {
