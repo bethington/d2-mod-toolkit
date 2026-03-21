@@ -19,6 +19,8 @@ namespace {
     DWORD g_stepDelay = 500; // ms between steps
     int g_retryCount = 0;
     bool g_exitRequested = false;
+    bool g_quitRequested = false;
+    DWORD g_quitStartTime = 0;
 
     // Count controls by type
     struct ControlCounts {
@@ -268,11 +270,38 @@ namespace GameNav {
         g_exitRequested = true;
     }
 
+    void RequestQuitGame() {
+        g_quitRequested = true;
+        g_quitStartTime = GetTickCount();
+        // If in-game, exit first to save
+        if (IsGameReady()) {
+            g_exitRequested = true;
+        }
+    }
+
     void CheckPendingExit() {
-        if (g_exitRequested) {
+        if (g_exitRequested && !g_quitRequested) {
             g_exitRequested = false;
             if (IsGameReady()) {
                 D2CLIENT_ExitGame();
+            }
+        }
+
+        if (g_quitRequested) {
+            DWORD elapsed = GetTickCount() - g_quitStartTime;
+
+            // Step 1: exit game to save (first 500ms)
+            if (g_exitRequested && elapsed < 500) {
+                g_exitRequested = false;
+                if (IsGameReady()) {
+                    D2CLIENT_ExitGame();
+                }
+            }
+
+            // Step 2: after enough time for save, terminate
+            if (elapsed >= 3000) {
+                g_quitRequested = false;
+                TerminateProcess(GetCurrentProcess(), 0);
             }
         }
     }

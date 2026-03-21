@@ -34,9 +34,12 @@ namespace GameNav {
     // Cancel ongoing navigation
     void Cancel();
 
-    // Request a graceful game exit (executed on game thread)
+    // Request a graceful game exit to menu (executed on game thread)
     void RequestExitGame();
 
-    // Check and execute pending exit (call from game loop)
+    // Request full quit — exit game then close process
+    void RequestQuitGame();
+
+    // Check and execute pending exit/quit (call from game loop)
     void CheckPendingExit();
 }

@@ -47,6 +47,7 @@ DWORD WINAPI GameThread(VOID* lpvoid) {
 			BH::oogDraw->Remove();
 		}
 		GameNav::Update();
+		GameNav::CheckPendingExit();
 		Sleep(10);
 	}
 }

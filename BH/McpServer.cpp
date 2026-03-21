@@ -245,8 +245,14 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "quit_game"},
+            {"description", "Fully close Diablo II. If in-game, saves first then terminates the process."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
             {"name", "exit_game"},
-            {"description", "Gracefully exit the current game (save and return to menu). Does nothing if not in-game."},
+            {"description", "Exit the current game to the menu (save and return to character select). Does not close Diablo II."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
@@ -765,6 +771,12 @@ namespace {
                 {"belt_snapshot", snapJson}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "quit_game") {
+            // Queue quit: if in-game, saves first, then terminates after 2 seconds
+            GameNav::RequestQuitGame();
+            return {{"content", {{{"type", "text"}, {"text", "Quit queued — saving and closing Diablo II"}}}}};
         }
 
         if (name == "exit_game") {
