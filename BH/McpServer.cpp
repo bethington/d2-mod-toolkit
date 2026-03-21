@@ -10,6 +10,11 @@
 #include <atomic>
 #include <string>
 #include <sstream>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <map>
+#include <functional>
 
 // cpp-httplib — single header HTTP server
 #include "../ThirdParty/httplib.h"
@@ -25,6 +30,44 @@ namespace {
     std::atomic<int>  g_requestCount{0};
     int g_port = 21337;
     httplib::Server* g_server = nullptr;
+
+    // SSE session management
+    // Each SSE client gets a unique session ID. Responses to JSON-RPC requests
+    // are pushed back through the SSE stream for that session.
+    std::atomic<int> g_nextSessionId{1};
+
+    struct SseSession {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::queue<std::string> messages; // SSE-formatted messages to send
+        bool closed = false;
+    };
+
+    std::mutex g_sessionsMutex;
+    std::map<int, std::shared_ptr<SseSession>> g_sessions;
+
+    void SendSseMessage(int sessionId, const std::string& event, const std::string& data) {
+        std::lock_guard<std::mutex> lock(g_sessionsMutex);
+        auto it = g_sessions.find(sessionId);
+        if (it != g_sessions.end()) {
+            auto& session = it->second;
+            std::lock_guard<std::mutex> slock(session->mutex);
+            std::string msg = "event: " + event + "\ndata: " + data + "\n\n";
+            session->messages.push(msg);
+            session->cv.notify_one();
+        }
+    }
+
+    void CloseSseSession(int sessionId) {
+        std::lock_guard<std::mutex> lock(g_sessionsMutex);
+        auto it = g_sessions.find(sessionId);
+        if (it != g_sessions.end()) {
+            auto& session = it->second;
+            std::lock_guard<std::mutex> slock(session->mutex);
+            session->closed = true;
+            session->cv.notify_one();
+        }
+    }
 
     // MCP protocol version
     static const char* MCP_VERSION = "2024-11-05";
@@ -176,8 +219,15 @@ namespace {
         });
 
         // POST /mcp — JSON-RPC endpoint
+        // Accepts an optional ?sessionId= query param to route response through SSE
         g_server->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
             g_requestCount++;
+
+            // Check for session ID to route response through SSE
+            int sessionId = 0;
+            if (req.has_param("sessionId")) {
+                sessionId = std::atoi(req.get_param_value("sessionId").c_str());
+            }
 
             try {
                 json request = json::parse(req.body);
@@ -185,11 +235,19 @@ namespace {
 
                 if (response.is_null()) {
                     // Notification — no response body
-                    res.status = 204;
+                    res.status = 202;
                     return;
                 }
 
-                res.set_content(response.dump(), "application/json");
+                if (sessionId > 0) {
+                    // Route response through the SSE stream
+                    SendSseMessage(sessionId, "message", response.dump());
+                    res.status = 202;
+                    res.set_content("", "text/plain");
+                } else {
+                    // Direct HTTP response (for non-SSE clients like curl)
+                    res.set_content(response.dump(), "application/json");
+                }
             }
             catch (const json::parse_error& e) {
                 json error = {
@@ -200,7 +258,12 @@ namespace {
                         {"message", std::string("Parse error: ") + e.what()}
                     }}
                 };
-                res.set_content(error.dump(), "application/json");
+                if (sessionId > 0) {
+                    SendSseMessage(sessionId, "message", error.dump());
+                    res.status = 202;
+                } else {
+                    res.set_content(error.dump(), "application/json");
+                }
             }
             catch (...) {
                 json error = {
@@ -211,20 +274,82 @@ namespace {
                         {"message", "Internal error"}
                     }}
                 };
-                res.set_content(error.dump(), "application/json");
+                if (sessionId > 0) {
+                    SendSseMessage(sessionId, "message", error.dump());
+                    res.status = 202;
+                } else {
+                    res.set_content(error.dump(), "application/json");
+                }
             }
         });
 
         // GET /mcp/sse — Server-Sent Events endpoint
+        // Keeps the connection open. Sends an initial 'endpoint' event with
+        // the POST URL (including sessionId), then streams responses back.
         g_server->Get("/mcp/sse", [](const httplib::Request&, httplib::Response& res) {
-            // For now, just send the endpoint info and keep alive
-            // Full SSE streaming will be added when we need server-initiated events
-            res.set_header("Content-Type", "text/event-stream");
+            int sessionId = g_nextSessionId++;
+
+            // Create session
+            auto session = std::make_shared<SseSession>();
+            {
+                std::lock_guard<std::mutex> lock(g_sessionsMutex);
+                g_sessions[sessionId] = session;
+            }
+
+            // Build the endpoint URL with session ID
+            std::string postUrl = "/mcp?sessionId=" + std::to_string(sessionId);
+
             res.set_header("Cache-Control", "no-cache");
             res.set_header("Connection", "keep-alive");
+            res.set_header("X-Accel-Buffering", "no");
 
-            std::string event = "event: endpoint\ndata: /mcp\n\n";
-            res.set_content(event, "text/event-stream");
+            // Track whether we've sent the endpoint event for this connection
+            auto sentEndpoint = std::make_shared<bool>(false);
+
+            // Use chunked content provider to stream SSE events
+            res.set_chunked_content_provider(
+                "text/event-stream",
+                [sessionId, session, postUrl, sentEndpoint](size_t /*offset*/, httplib::DataSink& sink) -> bool {
+                    // Send the initial endpoint event
+                    if (!*sentEndpoint) {
+                        std::string endpointEvent = "event: endpoint\ndata: " + postUrl + "\n\n";
+                        sink.write(endpointEvent.c_str(), endpointEvent.size());
+                        *sentEndpoint = true;
+                    }
+
+                    // Wait for messages or shutdown
+                    std::unique_lock<std::mutex> lock(session->mutex);
+                    session->cv.wait_for(lock, std::chrono::seconds(15), [&session]() {
+                        return !session->messages.empty() || session->closed;
+                    });
+
+                    if (session->closed) {
+                        return false; // Close the stream
+                    }
+
+                    // Send all queued messages
+                    while (!session->messages.empty()) {
+                        std::string msg = session->messages.front();
+                        session->messages.pop();
+                        if (!sink.write(msg.c_str(), msg.size())) {
+                            return false;
+                        }
+                    }
+
+                    // If no messages, send a keep-alive comment
+                    if (session->messages.empty()) {
+                        std::string keepalive = ": keepalive\n\n";
+                        sink.write(keepalive.c_str(), keepalive.size());
+                    }
+
+                    return true; // Keep connection open
+                },
+                [sessionId](bool /*success*/) {
+                    // Cleanup session on disconnect
+                    std::lock_guard<std::mutex> lock(g_sessionsMutex);
+                    g_sessions.erase(sessionId);
+                }
+            );
         });
 
         // GET /health — simple health check
