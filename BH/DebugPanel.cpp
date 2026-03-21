@@ -908,7 +908,68 @@ namespace {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Rendering")) {
-                ImGui::Text("Viewport and camera debug info will appear here.");
+                ImVec4 cGold5(0.85f, 0.72f, 0.45f, 1.0f);
+                ImVec4 cGray5(0.6f, 0.6f, 0.6f, 1.0f);
+
+                if (!GameState::IsGameReady()) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Not in game");
+                } else {
+                    // Screen info
+                    DWORD screenW = *p_D2CLIENT_ScreenSizeX;
+                    DWORD screenH = *p_D2CLIENT_ScreenSizeY;
+                    DWORD fps = *p_D2CLIENT_FPS;
+                    ImGui::TextColored(cGold5, "Screen:"); ImGui::SameLine();
+                    ImGui::Text("%dx%d", screenW, screenH);
+                    ImGui::SameLine(); ImGui::TextColored(cGold5, "  FPS:"); ImGui::SameLine();
+                    ImGui::Text("%d", fps);
+
+                    // Mouse
+                    DWORD mouseX = *p_D2CLIENT_MouseX;
+                    DWORD mouseY = *p_D2CLIENT_MouseY;
+                    int mouseOffX = *p_D2CLIENT_MouseOffsetX;
+                    int mouseOffY = *p_D2CLIENT_MouseOffsetY;
+                    ImGui::TextColored(cGold5, "Mouse:"); ImGui::SameLine();
+                    ImGui::Text("(%d, %d)", mouseX, mouseY);
+                    ImGui::SameLine(); ImGui::TextColored(cGold5, "  Offset:"); ImGui::SameLine();
+                    ImGui::Text("(%d, %d)", mouseOffX, mouseOffY);
+
+                    // Camera/viewport offset
+                    POINT* pOffset = p_D2CLIENT_Offset;
+                    if (pOffset) {
+                        ImGui::TextColored(cGold5, "Camera Offset:"); ImGui::SameLine();
+                        ImGui::Text("(%d, %d)", pOffset->x, pOffset->y);
+                    }
+
+                    // Panel offset
+                    int panelOffX = *p_D2CLIENT_PanelOffsetX;
+                    ImGui::TextColored(cGold5, "Panel Offset X:"); ImGui::SameLine();
+                    ImGui::Text("%d", panelOffX);
+
+                    // Automap
+                    ImGui::Separator();
+                    DWORD automapOn = *p_D2CLIENT_AutomapOn;
+                    int automapMode = *p_D2CLIENT_AutomapMode;
+                    ImGui::TextColored(cGold5, "Automap:"); ImGui::SameLine();
+                    ImGui::Text("%s (mode %d)", automapOn ? "ON" : "OFF", automapMode);
+
+                    // Player world position
+                    auto ps = GameState::GetPlayerState();
+                    ImGui::TextColored(cGold5, "World Pos:"); ImGui::SameLine();
+                    ImGui::Text("(%d, %d)", ps.x, ps.y);
+
+                    // Area info from game state
+                    ImGui::TextColored(cGold5, "Area:"); ImGui::SameLine();
+                    ImGui::Text("%s (%d)", ps.areaName[0] ? ps.areaName : "?", ps.area);
+
+                    // Renderer info
+                    ImGui::Separator();
+                    ImGui::TextColored(cGold5, "Renderer:"); ImGui::SameLine();
+                    DWORD gfxScreenSize = D2GFX_GetScreenSize();
+                    const char* renderers[] = {"GDI", "Software", "DirectDraw", "Glide", "OpenGL", "Direct3D"};
+                    ImGui::Text("Glide (3dfx mode)");  // We always use -3dfx
+                    ImGui::TextColored(cGold5, "GFX Screen Size:"); ImGui::SameLine();
+                    ImGui::Text("%d", gfxScreenSize);
+                }
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
