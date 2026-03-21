@@ -238,6 +238,12 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "exit_game"},
+            {"description", "Gracefully exit the current game (save and return to menu). Does nothing if not in-game."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
             {"name", "install_hook"},
             {"description", "Install a Detours hook on a game function to log calls. Captures arguments and return values."},
             {"inputSchema", {
@@ -733,6 +739,14 @@ namespace {
                 {"belt_snapshot", snapJson}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "exit_game") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}};
+            }
+            D2CLIENT_ExitGame();
+            return {{"content", {{{"type", "text"}, {"text", "Exit game initiated — saving and returning to menu"}}}}};
         }
 
         if (name == "install_hook") {

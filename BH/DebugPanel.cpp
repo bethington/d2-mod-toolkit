@@ -3,6 +3,7 @@
 #include "GameState.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "HookManager.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -665,10 +666,91 @@ namespace {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Debug")) {
-                ImGui::Text("Function hooks and call log will appear here.");
+                ImVec4 cGold2(0.85f, 0.72f, 0.45f, 1.0f);
+                ImVec4 cGreen2(0.4f, 1.0f, 0.4f, 1.0f);
+                ImVec4 cRed2(1.0f, 0.4f, 0.4f, 1.0f);
+                ImVec4 cGray2(0.6f, 0.6f, 0.6f, 1.0f);
+
+                // -- Installed Hooks --
+                auto hooks = HookManager::ListHooks();
+                ImGui::TextColored(cGold2, "Hooks: %d", (int)hooks.size());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove All##hooks")) {
+                    HookManager::RemoveAllHooks();
+                }
+
+                if (!hooks.empty()) {
+                    if (ImGui::BeginTable("HooksTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("Calls", ImGuiTableColumnFlags_WidthFixed, 70 * g_dpiScale);
+                        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 30 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (auto& h : hooks) {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", h.config.address);
+                            ImGui::Text("%s", addrBuf);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%s", h.config.name.c_str());
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%d", h.callCount);
+                            ImGui::TableNextColumn();
+                            char btnId[32]; snprintf(btnId, sizeof(btnId), "X##%08X", h.config.address);
+                            if (ImGui::SmallButton(btnId)) {
+                                HookManager::RemoveHook(h.config.address);
+                            }
+                        }
+                        ImGui::EndTable();
+                    }
+                }
+
                 ImGui::Separator();
-                ImGui::Text("Crash/Exception Log:");
-                ImGui::Text("  (no exceptions captured)");
+
+                // -- Call Log --
+                int logSize = HookManager::GetCallLogSize();
+                ImGui::TextColored(cGold2, "Call Log: %d entries", logSize);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear##log")) {
+                    HookManager::ClearCallLog();
+                }
+
+                if (logSize > 0) {
+                    // Show last N entries
+                    auto records = HookManager::GetCallLog(50, 0);
+                    if (ImGui::BeginTable("CallLogTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, 200 * g_dpiScale))) {
+                        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Return", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 70 * g_dpiScale);
+                        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 80 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        // Show in reverse order (newest first)
+                        for (int i = (int)records.size() - 1; i >= 0; i--) {
+                            auto& r = records[i];
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", r.address);
+                            ImGui::Text("%s", addrBuf);
+                            ImGui::TableNextColumn();
+                            if (r.hasReturnValue) {
+                                char retBuf[16]; snprintf(retBuf, sizeof(retBuf), "0x%08X", r.returnValue);
+                                ImGui::TextColored(r.returnValue ? cGreen2 : cGray2, "%s", retBuf);
+                            }
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%u", r.threadId);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%u", r.timestamp);
+                        }
+                        ImGui::EndTable();
+                    }
+                }
+
+                ImGui::Separator();
+                ImGui::TextColored(cGold2, "Crash/Exception Log:");
+                ImGui::TextColored(cGray2, "  (no exceptions captured)");
+
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Memory")) {
