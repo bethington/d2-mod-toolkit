@@ -7,6 +7,9 @@
 // Ring buffer size for call log
 static const int MAX_CALL_LOG = 10000;
 
+// Must be at file scope (not in anonymous namespace) for inline asm access
+extern "C" DWORD g_hookSavedReturnValue = 0;
+
 namespace {
     std::mutex g_mutex;
 
@@ -106,85 +109,89 @@ namespace {
         return -1;
     }
 
-    // Generic detour that captures entry args, calls original, logs result.
-    // We need one C function per slot since Detours needs distinct function pointers.
-    // Using a macro to generate them.
+    // Generic function pointer type for Detours
+    typedef void (__cdecl *GenericFunc)();
 
-    #define DEFINE_DETOUR_SLOT(N) \
-    static void* g_origFunc_##N = nullptr; \
-    static DWORD __stdcall DetourFunc_##N() { \
-        /* This is a placeholder — real hooking uses naked asm */ \
-        return 0; \
-    }
-
-    // Actually, for a practical approach that works with __stdcall functions
-    // of unknown signature, we use naked asm detours that:
-    // 1. Capture ESP (stack args), ECX, EDX
-    // 2. Call original
-    // 3. Log
-    //
-    // But naked functions can't use C++ objects. Let's use a simpler approach:
-    // Each detour is a naked function that pushes the slot index and jumps
-    // to a common handler.
-
-    // Common entry handler — called from naked detour with slot index on stack
-    void __cdecl CommonDetourEntry(int slotIndex) {
-        if (slotIndex < 0 || slotIndex >= MAX_HOOKS) return;
-        DetourSlot& slot = g_slots[slotIndex];
+    // C helper for logging — called from naked asm
+    void __cdecl DoLogEntry(int slotIdx, DWORD retVal) {
+        if (slotIdx < 0 || slotIdx >= MAX_HOOKS) return;
+        DetourSlot& slot = g_slots[slotIdx];
         if (!slot.active) return;
-
-        t_currentHookAddr = slot.hookAddress;
-        t_capturedArgCount = 0;
-
-        // Capture args from the caller's stack frame
-        // The caller's return address is at [ESP], args start at [ESP+4]
-        // But we're called from the naked detour which has modified the stack
-        // This is complex — for now, just log the entry
+        LogCall(slot.hookAddress, retVal, true);
     }
 
-    // For the initial implementation, let's use a simpler approach:
-    // Each hook gets a pair of functions generated via Detours' API.
-    // We hook with DetourAttach, providing our own function that matches
-    // the calling convention. Since we don't know the convention, we use
-    // a generic approach: hook as __cdecl with void* return.
+    // Naked detour per slot.
+    // Detours redirects the target function's callers to our detour.
+    // The stack is set up exactly as if the caller called us instead of the target.
+    // We call the original (trampoline), capture EAX, log, and return.
 
-    // Simplified: just track that the function was called, capture EAX return
-    typedef void* (__cdecl *GenericFunc)();
+    // Per-slot original function pointers and log helpers.
+    // Written as individual functions to avoid MSVC inline asm macro issues.
 
-    // We need per-slot trampoline + detour pairs.
-    // Generate with macro for up to 64 slots.
+    static GenericFunc g_pOriginal_0 = nullptr;
+    static void __cdecl DoLog_0(DWORD rv) { DoLogEntry(0, rv); }
+    static __declspec(naked) void Detour_0() {
+        __asm call [g_pOriginal_0]
+        __asm push eax
+        __asm pushad
+        __asm push eax
+        __asm call DoLog_0
+        __asm add esp, 4
+        __asm popad
+        __asm pop eax
+        __asm ret
+    }
 
+    // Generate remaining slots with the same pattern via a helper macro
+    // that uses single-line __asm statements
     #define SLOT_FUNCS(N) \
     static GenericFunc g_pOriginal_##N = nullptr; \
-    static void* __cdecl Detour_##N() { \
-        /* Capture entry */ \
-        DWORD addr = g_slots[N].hookAddress; \
-        int nArgs = g_slots[N].argCount; \
-        /* Read args from stack — our caller pushed them before calling us */ \
-        /* For __cdecl, args are at [ESP+4], [ESP+8], etc. */ \
-        /* But Detours redirected the call, so args are still on stack */ \
-        DWORD* pStack = nullptr; \
-        __asm { mov pStack, esp } \
-        t_capturedArgCount = nArgs; \
-        for (int i = 0; i < nArgs && i < 8; i++) { \
-            t_capturedArgs[i] = pStack[i + 1]; /* +1 to skip return addr */ \
-        } \
-        /* Call original */ \
-        void* result = g_pOriginal_##N(); \
-        /* Log */ \
-        LogCall(addr, (DWORD)result, true); \
-        return result; \
+    static void __cdecl DoLog_##N(DWORD rv) { DoLogEntry(N, rv); }
+
+    #define SLOT_DETOUR(N) \
+    static __declspec(naked) void Detour_##N() { \
+        __asm call [g_pOriginal_##N] \
+        __asm push eax \
+        __asm pushad \
+        __asm push eax \
+        __asm call DoLog_##N \
+        __asm add esp, 4 \
+        __asm popad \
+        __asm pop eax \
+        __asm ret \
     }
 
-    // Generate 64 slots
-    SLOT_FUNCS(0)  SLOT_FUNCS(1)  SLOT_FUNCS(2)  SLOT_FUNCS(3)
-    SLOT_FUNCS(4)  SLOT_FUNCS(5)  SLOT_FUNCS(6)  SLOT_FUNCS(7)
-    SLOT_FUNCS(8)  SLOT_FUNCS(9)  SLOT_FUNCS(10) SLOT_FUNCS(11)
-    SLOT_FUNCS(12) SLOT_FUNCS(13) SLOT_FUNCS(14) SLOT_FUNCS(15)
-    SLOT_FUNCS(16) SLOT_FUNCS(17) SLOT_FUNCS(18) SLOT_FUNCS(19)
-    SLOT_FUNCS(20) SLOT_FUNCS(21) SLOT_FUNCS(22) SLOT_FUNCS(23)
-    SLOT_FUNCS(24) SLOT_FUNCS(25) SLOT_FUNCS(26) SLOT_FUNCS(27)
-    SLOT_FUNCS(28) SLOT_FUNCS(29) SLOT_FUNCS(30) SLOT_FUNCS(31)
+    SLOT_FUNCS(1)  SLOT_DETOUR(1)
+    SLOT_FUNCS(2)  SLOT_DETOUR(2)
+    SLOT_FUNCS(3)  SLOT_DETOUR(3)
+    SLOT_FUNCS(4)  SLOT_DETOUR(4)
+    SLOT_FUNCS(5)  SLOT_DETOUR(5)
+    SLOT_FUNCS(6)  SLOT_DETOUR(6)
+    SLOT_FUNCS(7)  SLOT_DETOUR(7)
+    SLOT_FUNCS(8)  SLOT_DETOUR(8)
+    SLOT_FUNCS(9)  SLOT_DETOUR(9)
+    SLOT_FUNCS(10) SLOT_DETOUR(10)
+    SLOT_FUNCS(11) SLOT_DETOUR(11)
+    SLOT_FUNCS(12) SLOT_DETOUR(12)
+    SLOT_FUNCS(13) SLOT_DETOUR(13)
+    SLOT_FUNCS(14) SLOT_DETOUR(14)
+    SLOT_FUNCS(15) SLOT_DETOUR(15)
+    SLOT_FUNCS(16) SLOT_DETOUR(16)
+    SLOT_FUNCS(17) SLOT_DETOUR(17)
+    SLOT_FUNCS(18) SLOT_DETOUR(18)
+    SLOT_FUNCS(19) SLOT_DETOUR(19)
+    SLOT_FUNCS(20) SLOT_DETOUR(20)
+    SLOT_FUNCS(21) SLOT_DETOUR(21)
+    SLOT_FUNCS(22) SLOT_DETOUR(22)
+    SLOT_FUNCS(23) SLOT_DETOUR(23)
+    SLOT_FUNCS(24) SLOT_DETOUR(24)
+    SLOT_FUNCS(25) SLOT_DETOUR(25)
+    SLOT_FUNCS(26) SLOT_DETOUR(26)
+    SLOT_FUNCS(27) SLOT_DETOUR(27)
+    SLOT_FUNCS(28) SLOT_DETOUR(28)
+    SLOT_FUNCS(29) SLOT_DETOUR(29)
+    SLOT_FUNCS(30) SLOT_DETOUR(30)
+    SLOT_FUNCS(31) SLOT_DETOUR(31)
 
     // Lookup tables for slot functions
     GenericFunc* g_pOriginals[32] = {
