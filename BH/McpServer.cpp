@@ -70,6 +70,25 @@ namespace {
         }
     }
 
+    // Safe memory access helpers (SEH can't be in functions with C++ objects)
+    static bool SafeMemRead(DWORD addr, void* dest, size_t size) {
+        __try {
+            memcpy(dest, (void*)addr, size);
+            return true;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    static bool SafeMemWrite(DWORD addr, const void* src, size_t size) {
+        __try {
+            memcpy((void*)addr, src, size);
+            return true;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
     // MCP protocol version
     static const char* MCP_VERSION = "2024-11-05";
 
@@ -137,6 +156,52 @@ namespace {
                     }}
                 }},
                 {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "read_memory"},
+            {"description", "Read bytes from a memory address in the game process. Returns hex dump and interpreted values."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {
+                        {"type", "string"},
+                        {"description", "Hex address to read from (e.g., '0x6FAB0000')"}
+                    }},
+                    {"size", {
+                        {"type", "integer"},
+                        {"description", "Number of bytes to read (default 64, max 4096)"}
+                    }},
+                    {"format", {
+                        {"type", "string"},
+                        {"description", "Output format: 'hex' (default), 'dwords', 'ascii', 'all'"}
+                    }}
+                }},
+                {"required", {"address"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "write_memory"},
+            {"description", "Write bytes to a memory address in the game process. Use with caution."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {
+                        {"type", "string"},
+                        {"description", "Hex address to write to (e.g., '0x6FAB0000')"}
+                    }},
+                    {"bytes", {
+                        {"type", "string"},
+                        {"description", "Hex string of bytes to write (e.g., '90 90 90' or '909090')"}
+                    }},
+                    {"dword", {
+                        {"type", "integer"},
+                        {"description", "Write a 32-bit DWORD value instead of raw bytes"}
+                    }}
+                }},
+                {"required", {"address"}}
             }}
         });
 
@@ -411,6 +476,147 @@ namespace {
                     {"text", info.dump(2)}
                 }}}
             };
+        }
+
+        if (name == "read_memory") {
+            std::string addrStr = arguments.value("address", "");
+            int size = arguments.value("size", 64);
+            std::string format = arguments.value("format", "all");
+
+            if (addrStr.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "address is required"}}}}, {"isError", true}};
+            }
+            if (size < 1) size = 1;
+            if (size > 4096) size = 4096;
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            if (addr == 0) {
+                return {{"content", {{{"type", "text"}, {"text", "Invalid address: " + addrStr}}}}, {"isError", true}};
+            }
+
+            // Read memory with SEH protection
+            std::vector<BYTE> buffer(size, 0);
+            bool readOk = SafeMemRead(addr, buffer.data(), size);
+
+            if (!readOk) {
+                return {{"content", {{{"type", "text"}, {"text", "Access violation reading address " + addrStr}}}}, {"isError", true}};
+            }
+
+            json result;
+            result["address"] = addrStr;
+            result["size"] = size;
+
+            // Hex dump
+            if (format == "hex" || format == "all") {
+                std::string hexStr;
+                char hexBuf[4];
+                for (int i = 0; i < size; i++) {
+                    if (i > 0 && i % 16 == 0) hexStr += "\n";
+                    else if (i > 0) hexStr += " ";
+                    snprintf(hexBuf, sizeof(hexBuf), "%02X", buffer[i]);
+                    hexStr += hexBuf;
+                }
+                result["hex"] = hexStr;
+            }
+
+            // DWORD values
+            if (format == "dwords" || format == "all") {
+                json dwords = json::array();
+                for (int i = 0; i + 3 < size; i += 4) {
+                    DWORD val = *(DWORD*)(buffer.data() + i);
+                    char addrBuf[16];
+                    snprintf(addrBuf, sizeof(addrBuf), "0x%08X", addr + i);
+                    dwords.push_back({{"offset", i}, {"address", addrBuf}, {"value", val},
+                        {"hex", (std::stringstream() << "0x" << std::hex << std::uppercase << val).str()}});
+                }
+                result["dwords"] = dwords;
+            }
+
+            // ASCII
+            if (format == "ascii" || format == "all") {
+                std::string ascii;
+                for (int i = 0; i < size; i++) {
+                    ascii += (buffer[i] >= 32 && buffer[i] < 127) ? (char)buffer[i] : '.';
+                }
+                result["ascii"] = ascii;
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
+        }
+
+        if (name == "write_memory") {
+            std::string addrStr = arguments.value("address", "");
+            if (addrStr.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "address is required"}}}}, {"isError", true}};
+            }
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            if (addr == 0) {
+                return {{"content", {{{"type", "text"}, {"text", "Invalid address: " + addrStr}}}}, {"isError", true}};
+            }
+
+            std::vector<BYTE> bytes;
+
+            if (arguments.contains("dword")) {
+                DWORD val = arguments["dword"].get<DWORD>();
+                bytes.resize(4);
+                *(DWORD*)bytes.data() = val;
+            } else if (arguments.contains("bytes")) {
+                std::string hexStr = arguments["bytes"].get<std::string>();
+                // Parse hex string (supports "90 90 90" or "909090")
+                for (size_t i = 0; i < hexStr.size(); i++) {
+                    if (isspace(hexStr[i])) continue;
+                    if (i + 1 < hexStr.size() && isxdigit(hexStr[i]) && isxdigit(hexStr[i+1])) {
+                        char tmp[3] = { hexStr[i], hexStr[i+1], 0 };
+                        bytes.push_back((BYTE)strtoul(tmp, nullptr, 16));
+                        i++; // skip second nibble
+                    }
+                }
+            } else {
+                return {{"content", {{{"type", "text"}, {"text", "Either 'bytes' or 'dword' parameter required"}}}}, {"isError", true}};
+            }
+
+            if (bytes.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "No bytes to write"}}}}, {"isError", true}};
+            }
+
+            // Read original bytes first (for undo/reporting)
+            std::vector<BYTE> original(bytes.size(), 0);
+            if (!SafeMemRead(addr, original.data(), bytes.size())) {
+                return {{"content", {{{"type", "text"}, {"text", "Access violation reading original bytes at " + addrStr}}}}, {"isError", true}};
+            }
+
+            // Make memory writable, write, restore protection
+            DWORD oldProtect;
+            if (!VirtualProtect((void*)addr, bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+                return {{"content", {{{"type", "text"}, {"text", "VirtualProtect failed at " + addrStr}}}}, {"isError", true}};
+            }
+
+            bool writeOk = SafeMemWrite(addr, bytes.data(), bytes.size());
+
+            VirtualProtect((void*)addr, bytes.size(), oldProtect, &oldProtect);
+
+            if (!writeOk) {
+                return {{"content", {{{"type", "text"}, {"text", "Access violation writing to " + addrStr}}}}, {"isError", true}};
+            }
+
+            // Build response with original and new values
+            std::string origHex, newHex;
+            char hexBuf[4];
+            for (size_t i = 0; i < bytes.size(); i++) {
+                if (i > 0) { origHex += " "; newHex += " "; }
+                snprintf(hexBuf, sizeof(hexBuf), "%02X", original[i]); origHex += hexBuf;
+                snprintf(hexBuf, sizeof(hexBuf), "%02X", bytes[i]); newHex += hexBuf;
+            }
+
+            json result = {
+                {"address", addrStr},
+                {"bytes_written", bytes.size()},
+                {"original", origHex},
+                {"written", newHex}
+            };
+
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
 
         return {

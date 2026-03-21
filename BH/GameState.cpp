@@ -462,27 +462,35 @@ namespace {
                 int dy = nu.y - playerY;
                 nu.distance = (int)sqrt((double)(dx * dx + dy * dy));
 
+                // Get unit name from game data tables
+                try {
+                    wchar_t* wName = D2CLIENT_GetUnitName(pUnit);
+                    if (wName) {
+                        WideCharToMultiByte(CP_UTF8, 0, wName, -1, nu.name, sizeof(nu.name) - 1, nullptr, nullptr);
+                    }
+                } catch (...) {}
+
                 if (pUnit->dwType == 1) { // Monster
                     nu.hp = D2COMMON_GetUnitStat(pUnit, STAT_HP, 0);
                     nu.maxHp = D2COMMON_GetUnitStat(pUnit, STAT_MAXHP, 0);
 
                     if (pUnit->pMonsterData) {
-                        // Check monster flags for boss/champion/minion
-                        // Flag 0x0E = boss, champion, etc.
                         BYTE flags = pUnit->pMonsterData->fBoss;
                         nu.isBoss = (flags & 1) != 0;
                         nu.isChampion = (flags & 2) != 0;
                         nu.isMinion = (flags & 4) != 0;
                     }
-                    snprintf(nu.name, sizeof(nu.name), "Monster#%d", pUnit->dwTxtFileNo);
+                    // Fallback if name lookup failed
+                    if (!nu.name[0]) snprintf(nu.name, sizeof(nu.name), "Monster#%d", pUnit->dwTxtFileNo);
                 } else if (pUnit->dwType == 0) { // Player
                     nu.hp = D2COMMON_GetUnitStat(pUnit, STAT_HP, 0);
                     nu.maxHp = D2COMMON_GetUnitStat(pUnit, STAT_MAXHP, 0);
-                    if (pUnit->pPlayerData) {
+                    // Players: prefer pPlayerData->szName (ASCII, no lookup needed)
+                    if (pUnit->pPlayerData && !nu.name[0]) {
                         strncpy_s(nu.name, pUnit->pPlayerData->szName, sizeof(nu.name) - 1);
                     }
                 } else if (pUnit->dwType == 4) { // Item
-                    snprintf(nu.name, sizeof(nu.name), "Item#%d", pUnit->dwTxtFileNo);
+                    if (!nu.name[0]) snprintf(nu.name, sizeof(nu.name), "Item#%d", pUnit->dwTxtFileNo);
                 }
 
                 units.push_back(nu);

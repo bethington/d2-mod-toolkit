@@ -90,8 +90,7 @@
       <DataExecutionPrevention>false</DataExecutionPrevention>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /S /Q /F "$(OutDir)*.*" "$(DIABLO_DEBUG_FOLDER)\"
-powershell.exe -NoProfile -File "$(ProjectDir)..\..\scripts\CopyDataFolder.ps1"</Command>
+      <Command>if defined DIABLO_DEBUG_FOLDER (xcopy /Y /S /Q /F "$(OutDir)*.*" "$(DIABLO_DEBUG_FOLDER)\") else (echo No DIABLO_DEBUG_FOLDER set, skipping post-build copy)</Command>
     </PostBuildEvent>
     <PreBuildEvent>
       <Command>
@@ -126,7 +125,7 @@ powershell.exe -NoProfile -File "$(ProjectDir)..\..\scripts\CopyDataFolder.ps1"<
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
-      <Command>xcopy /Y /S /Q /F "$(OutDir)*.*" "$(DIABLO_DEBUG_FOLDER)\"</Command>
+      <Command>if defined DIABLO_DEBUG_FOLDER (xcopy /Y /S /Q /F "$(OutDir)*.*" "$(DIABLO_DEBUG_FOLDER)\") else (echo No DIABLO_DEBUG_FOLDER set, skipping post-build copy)</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Packaging|Win32'">
