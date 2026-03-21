@@ -7,6 +7,7 @@
 #include "GameState.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "HookManager.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -231,6 +232,54 @@ namespace {
                     {"pick_tp_scrolls", {{"type", "boolean"}, {"description", "Pick up TP scrolls when tome not full"}}},
                     {"pick_id_scrolls", {{"type", "boolean"}, {"description", "Pick up ID scrolls when tome not full"}}},
                     {"resnap", {{"type", "boolean"}, {"description", "Re-snapshot current belt layout"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "install_hook"},
+            {"description", "Install a Detours hook on a game function to log calls. Captures arguments and return values."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {{"type", "string"}, {"description", "Hex address of function to hook (e.g., '0x6FAB1234')"}}},
+                    {"name", {{"type", "string"}, {"description", "Friendly name for this hook"}}},
+                    {"capture", {{"type", "string"}, {"description", "Capture level: 'light', 'medium', 'full' (default 'light')"}}},
+                    {"arg_count", {{"type", "integer"}, {"description", "Number of stack arguments to capture (for medium/full, default 0)"}}}
+                }},
+                {"required", {"address"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "remove_hook"},
+            {"description", "Remove a previously installed hook by address."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {{"type", "string"}, {"description", "Hex address of hook to remove"}}},
+                    {"all", {{"type", "boolean"}, {"description", "Remove all hooks (ignores address)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "list_hooks"},
+            {"description", "List all installed function hooks with call counts."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "get_call_log"},
+            {"description", "Get recent function call log entries from installed hooks."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"max_entries", {{"type", "integer"}, {"description", "Max entries to return (default 50)"}}},
+                    {"address", {{"type", "string"}, {"description", "Filter by hook address (default all)"}}},
+                    {"clear", {{"type", "boolean"}, {"description", "Clear the log after reading"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -682,6 +731,123 @@ namespace {
                 {"pick_tp_scrolls", cfg.pickTpScrolls},
                 {"pick_id_scrolls", cfg.pickIdScrolls},
                 {"belt_snapshot", snapJson}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "install_hook") {
+            std::string addrStr = arguments.value("address", "");
+            if (addrStr.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "address is required"}}}}, {"isError", true}};
+            }
+
+            HookManager::HookConfig cfg;
+            cfg.address = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            cfg.name = arguments.value("name", addrStr);
+
+            std::string capStr = arguments.value("capture", "light");
+            if (capStr == "medium") cfg.capture = HookManager::CAPTURE_MEDIUM;
+            else if (capStr == "full") cfg.capture = HookManager::CAPTURE_FULL;
+            else cfg.capture = HookManager::CAPTURE_LIGHT;
+
+            cfg.argCount = arguments.value("arg_count", 0);
+            if (cfg.argCount > 8) cfg.argCount = 8;
+
+            bool ok = HookManager::InstallHook(cfg);
+            if (!ok) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed to install hook at " + addrStr + " (already hooked or no free slots)"}}}}, {"isError", true}};
+            }
+
+            json info = {
+                {"status", "installed"},
+                {"address", addrStr},
+                {"name", cfg.name},
+                {"capture", capStr},
+                {"arg_count", cfg.argCount}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "remove_hook") {
+            if (arguments.value("all", false)) {
+                HookManager::RemoveAllHooks();
+                return {{"content", {{{"type", "text"}, {"text", "All hooks removed"}}}}};
+            }
+
+            std::string addrStr = arguments.value("address", "");
+            if (addrStr.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "address or all=true required"}}}}, {"isError", true}};
+            }
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            bool ok = HookManager::RemoveHook(addr);
+            if (!ok) {
+                return {{"content", {{{"type", "text"}, {"text", "No hook at " + addrStr}}}}, {"isError", true}};
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", "Hook removed at " + addrStr}}}}};
+        }
+
+        if (name == "list_hooks") {
+            auto hooks = HookManager::ListHooks();
+            json list = json::array();
+            for (auto& h : hooks) {
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", h.config.address);
+                const char* capNames[] = {"light", "medium", "full"};
+                list.push_back({
+                    {"address", addrBuf},
+                    {"name", h.config.name},
+                    {"capture", capNames[h.config.capture]},
+                    {"arg_count", h.config.argCount},
+                    {"installed", h.installed},
+                    {"call_count", h.callCount}
+                });
+            }
+            json info = {{"count", list.size()}, {"hooks", list}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_call_log") {
+            int maxEntries = arguments.value("max_entries", 50);
+            DWORD filterAddr = 0;
+            if (arguments.contains("address")) {
+                filterAddr = (DWORD)strtoul(arguments["address"].get<std::string>().c_str(), nullptr, 16);
+            }
+
+            auto records = HookManager::GetCallLog(maxEntries, filterAddr);
+
+            if (arguments.value("clear", false)) {
+                HookManager::ClearCallLog();
+            }
+
+            json entries = json::array();
+            for (auto& r : records) {
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", r.address);
+                json entry = {
+                    {"address", addrBuf},
+                    {"timestamp", r.timestamp},
+                    {"thread_id", r.threadId},
+                    {"call_count", r.argCount}
+                };
+                if (r.argCount > 0) {
+                    json args = json::array();
+                    for (int i = 0; i < r.argCount; i++) {
+                        char argBuf[16]; snprintf(argBuf, sizeof(argBuf), "0x%08X", r.args[i]);
+                        args.push_back(argBuf);
+                    }
+                    entry["args"] = args;
+                }
+                if (r.hasReturnValue) {
+                    char retBuf[16]; snprintf(retBuf, sizeof(retBuf), "0x%08X", r.returnValue);
+                    entry["return_value"] = retBuf;
+                }
+                entries.push_back(entry);
+            }
+
+            json info = {
+                {"count", entries.size()},
+                {"total_logged", HookManager::GetCallLogSize()},
+                {"entries", entries}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }

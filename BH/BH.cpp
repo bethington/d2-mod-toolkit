@@ -13,6 +13,7 @@
 #include "McpServer.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "HookManager.h"
 
 string BH::path;
 HINSTANCE BH::instance;
@@ -135,6 +136,9 @@ void BH::Initialize()
 		DebugPanel::Init();
 	}
 
+	// Initialize hook manager
+	HookManager::Init();
+
 	// Start the MCP HTTP server
 	McpServer::Init(App.debugPanel.mcpPort.value);
 
@@ -193,6 +197,7 @@ bool BH::Shutdown()
 		oogDraw->Remove();
 	}
 
+	HookManager::Shutdown();
 	McpServer::Shutdown();
 	DebugPanel::Shutdown();
 
