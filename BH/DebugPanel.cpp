@@ -257,44 +257,223 @@ namespace {
                     const char* classNames[] = {"Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"};
                     const char* cls = (ps.classId >= 0 && ps.classId <= 6) ? classNames[ps.classId] : "Unknown";
 
-                    ImGui::Text("%s - Level %d %s", ps.name, ps.level, cls);
-                    ImGui::Text("Act %d  Area %d  Position (%d, %d)", ps.act + 1, ps.area, ps.x, ps.y);
+                    // Colors matching BH StatsDisplay
+                    ImVec4 cRed(1.0f, 0.3f, 0.3f, 1.0f);
+                    ImVec4 cBlue(0.4f, 0.6f, 1.0f, 1.0f);
+                    ImVec4 cYellow(1.0f, 1.0f, 0.3f, 1.0f);
+                    ImVec4 cGreen(0.3f, 1.0f, 0.3f, 1.0f);
+                    ImVec4 cGold(0.85f, 0.72f, 0.45f, 1.0f);
+                    ImVec4 cWhite(1.0f, 1.0f, 1.0f, 1.0f);
+                    ImVec4 cGray(0.6f, 0.6f, 0.6f, 1.0f);
+                    ImVec4 cPurple(0.7f, 0.4f, 1.0f, 1.0f);
+
+                    // Resistance penalty from game state (dynamic based on difficulty)
+                    int penalty = ps.resPenalty;
+
+                    // -- Name / Level / Class / Difficulty --
+                    float rightEdge = ImGui::GetWindowContentRegionMax().x;
+                    const char* diffNames[] = {"Normal", "Nightmare", "Hell"};
+                    const char* diff = (ps.difficulty >= 0 && ps.difficulty <= 2) ? diffNames[ps.difficulty] : "?";
+
+                    ImGui::TextColored(cGold, "Name:"); ImGui::SameLine();
+                    ImGui::Text("%s", ps.name);
+                    char levelBuf[64]; snprintf(levelBuf, sizeof(levelBuf), "Level: %d %s (%s)", ps.level, cls, diff);
+                    ImGui::SameLine(rightEdge - ImGui::CalcTextSize(levelBuf).x);
+                    ImGui::TextColored(cGold, "%s", levelBuf);
+
+                    // XP and area info (line 2)
+                    char xpBuf[64]; snprintf(xpBuf, sizeof(xpBuf), "XP: %.2f%% / Additional XP: %d%%", ps.xpPctToNext, ps.addXp);
+                    ImGui::SetCursorPosX(rightEdge - ImGui::CalcTextSize(xpBuf).x);
+                    ImGui::TextColored(cGold, "%s", xpBuf);
+
+                    // Area and player count (line 3)
+                    ImGui::TextColored(cGold, "Area:"); ImGui::SameLine();
+                    ImGui::Text("%s (%d)", ps.areaName[0] ? ps.areaName : "Unknown", ps.area);
+                    char playerBuf[32]; snprintf(playerBuf, sizeof(playerBuf), "Players: %d", ps.playerCount);
+                    ImGui::SameLine(rightEdge - ImGui::CalcTextSize(playerBuf).x);
+                    ImGui::TextColored(cGold, "%s", playerBuf);
+
+                    // -- Resistances --
+                    ImGui::TextColored(cRed, "Fire Resist:"); ImGui::SameLine();
+                    ImGui::TextColored(cRed, "%d", ps.fireRes + penalty); ImGui::SameLine();
+                    ImGui::Text("/ %d", ps.maxFireRes);
+
+                    ImGui::TextColored(cBlue, "Cold Resist:"); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "%d", ps.coldRes + penalty); ImGui::SameLine();
+                    ImGui::Text("/ %d", ps.maxColdRes); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "  Length: %d%%", ps.cannotBeFrozen > 0 ? 0 : (100 - 50 * (ps.halfFreeze > 2 ? 2 : ps.halfFreeze)));
+
+                    ImGui::TextColored(cYellow, "Lightning Resist:"); ImGui::SameLine();
+                    ImGui::TextColored(cYellow, "%d", ps.lightRes + penalty); ImGui::SameLine();
+                    ImGui::Text("/ %d", ps.maxLightRes);
+
+                    ImGui::TextColored(cGreen, "Poison Resist:"); ImGui::SameLine();
+                    ImGui::TextColored(cGreen, "%d", ps.poisonRes + penalty); ImGui::SameLine();
+                    ImGui::Text("/ %d", ps.maxPoisonRes); ImGui::SameLine();
+                    ImGui::Text("  Length: %d%%", 100 - penalty - ps.poisonLenReduce);
+
+                    int curseEff = ps.curseRes < 75 ? ps.curseRes : 75;
+                    int curseLen = 100 - ps.curseLenReduce;
+                    if (curseLen < 25) curseLen = 25;
+                    ImGui::TextColored(cGold, "Curse Resist:"); ImGui::SameLine();
+                    ImGui::TextColored(cGray, "%d / 75", curseEff); ImGui::SameLine();
+                    ImGui::Text("Length: %d%%", curseLen);
+
                     ImGui::Separator();
 
-                    // HP bar
-                    int hp = ps.hp >> 8, maxHp = ps.maxHp >> 8;
-                    float hpFrac = maxHp > 0 ? (float)hp / maxHp : 0;
-                    char hpLabel[32]; snprintf(hpLabel, sizeof(hpLabel), "HP: %d / %d", hp, maxHp);
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
-                    ImGui::ProgressBar(hpFrac, ImVec2(-1, 0), hpLabel);
-                    ImGui::PopStyleColor();
+                    // -- Absorption --
+                    ImGui::TextColored(cGold, "Absorption:");
+                    ImGui::SameLine();
+                    ImGui::TextColored(cRed, "%d/%d%%", ps.fireAbsorb, ps.fireAbsorbPct); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "%d/%d%%", ps.coldAbsorb, ps.coldAbsorbPct); ImGui::SameLine();
+                    ImGui::TextColored(cYellow, "%d/%d%%", ps.lightAbsorb, ps.lightAbsorbPct); ImGui::SameLine();
+                    ImGui::TextColored(cPurple, "%d/%d%%", ps.magicAbsorb, ps.magicAbsorbPct);
 
-                    // MP bar
-                    int mp = ps.mana >> 8, maxMp = ps.maxMana >> 8;
-                    float mpFrac = maxMp > 0 ? (float)mp / maxMp : 0;
-                    char mpLabel[32]; snprintf(mpLabel, sizeof(mpLabel), "Mana: %d / %d", mp, maxMp);
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.1f, 0.2f, 0.8f, 1.0f));
-                    ImGui::ProgressBar(mpFrac, ImVec2(-1, 0), mpLabel);
-                    ImGui::PopStyleColor();
+                    // -- Damage Reduction --
+                    ImGui::TextColored(cGold, "Damage Reduction:"); ImGui::SameLine();
+                    ImGui::Text("%d/%d%%", ps.dmgReduction, ps.dmgReductionPct); ImGui::SameLine();
+                    ImGui::TextColored(cPurple, "%d/%d%%", ps.magDmgReduction, ps.magDmgReductionPct);
 
-                    // Stamina bar
-                    int stam = ps.stamina >> 8, maxStam = ps.maxStamina >> 8;
-                    float stamFrac = maxStam > 0 ? (float)stam / maxStam : 0;
-                    char stamLabel[32]; snprintf(stamLabel, sizeof(stamLabel), "Stamina: %d / %d", stam, maxStam);
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.6f, 0.1f, 1.0f));
-                    ImGui::ProgressBar(stamFrac, ImVec2(-1, 0), stamLabel);
-                    ImGui::PopStyleColor();
+                    ImGui::TextColored(cGold, "Attacker Takes Damage:"); ImGui::SameLine();
+                    ImGui::Text("%d", ps.attackerTakesDmg); ImGui::SameLine();
+                    ImGui::TextColored(cYellow, " %d", ps.attackerTakesLtng);
 
                     ImGui::Separator();
-                    ImGui::Text("Gold: %d  Stash: %d", ps.gold, ps.goldStash);
-                    ImGui::Text("FCR: %d  FHR: %d  FBR: %d  IAS: %d  FRW: %d  MF: %d",
-                        ps.fcr, ps.fhr, ps.fbr, ps.ias, ps.frw, ps.mf);
-                    ImGui::Text("Res: Fire %d  Cold %d  Light %d  Poison %d",
-                        ps.fireRes, ps.coldRes, ps.lightRes, ps.poisonRes);
 
-                    // Belt
+                    // -- Elemental Mastery & Pierce --
+                    ImGui::TextColored(cGold, "Elemental Mastery:");
+                    ImGui::SameLine();
+                    ImGui::TextColored(cRed, "%d%%", ps.fireMastery); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "%d%%", ps.coldMastery); ImGui::SameLine();
+                    ImGui::TextColored(cYellow, "%d%%", ps.lightMastery); ImGui::SameLine();
+                    ImGui::TextColored(cGreen, "%d%%", ps.poisonMastery); ImGui::SameLine();
+                    ImGui::TextColored(cPurple, "%d%%", ps.magicMastery);
+
+                    ImGui::TextColored(cGold, "Elemental Pierce:");
+                    ImGui::SameLine();
+                    ImGui::TextColored(cRed, "%d%%", ps.firePierce); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "%d%%", ps.coldPierce); ImGui::SameLine();
+                    ImGui::TextColored(cYellow, "%d%%", ps.lightPierce); ImGui::SameLine();
+                    ImGui::TextColored(cGreen, "%d%%", ps.poisonPierce); ImGui::SameLine();
+                    ImGui::TextColored(cPurple, "%d%%", ps.magicPierce);
+
+                    // -- AR / Defense / Base Damage --
+                    int dexAR = ps.dexterity * 5;
+                    ImGui::TextColored(cGold, "Base AR:"); ImGui::SameLine();
+                    ImGui::Text("dex: %d  equip: %d  total: %d", dexAR, ps.attackRating, dexAR + ps.attackRating);
+
+                    int dexDef = ps.dexterity / 4;
+                    ImGui::TextColored(cGold, "Base Def:"); ImGui::SameLine();
+                    ImGui::Text("dex: %d  equip: %d  total: %d", dexDef, ps.defense, dexDef + ps.defense);
+
+                    ImGui::TextColored(cGold, "Base Damage:"); ImGui::SameLine();
+                    ImGui::Text("1h: %d-%d  2h: %d-%d", ps.minDmg, ps.maxDmg, ps.minDmg2, ps.maxDmg2);
+
                     ImGui::Separator();
-                    ImGui::Text("Belt:");
+
+                    // -- Breakpoints (includes rates) --
+                    float col2 = ImGui::GetContentRegionAvail().x * 0.5f;
+                    ImGui::TextColored(cGold, "Breakpoints (%s):", ps.bpSkillName[0] ? ps.bpSkillName : "N/A");
+
+                    // Helper lambda to render a breakpoint line
+                    auto drawBP = [&](const GameState::PlayerState::BreakpointInfo& bp) {
+                        if (bp.count == 0) return;
+                        ImGui::TextColored(cGold, "%s:", bp.label); ImGui::SameLine();
+                        ImGui::TextColored(cGold, "(%d)", bp.currentValue); ImGui::SameLine();
+                        for (int i = 0; i < bp.count; i++) {
+                            if (i == bp.activeIndex) {
+                                ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), "%d", bp.values[i]);
+                            } else {
+                                ImGui::Text("%d", bp.values[i]);
+                            }
+                            if (i < bp.count - 1) {
+                                ImGui::SameLine(); ImGui::TextColored(cGray, "/"); ImGui::SameLine();
+                            }
+                        }
+                    };
+
+                    drawBP(ps.bpFCR);
+                    drawBP(ps.bpFHR);
+                    ImGui::TextColored(cGold, "IAS (Frames):"); ImGui::SameLine(); ImGui::Text("N/A");
+
+                    // Remaining rates on one line
+                    ImGui::TextColored(cGold, "Block Rate:"); ImGui::SameLine(); ImGui::Text("%d", ps.fbr);
+                    ImGui::SameLine(); ImGui::TextColored(cGold, "  Run/Walk:"); ImGui::SameLine(); ImGui::Text("%d", ps.frw);
+                    ImGui::SameLine(); ImGui::TextColored(cGold, "  Attack Rate:"); ImGui::SameLine(); ImGui::Text("%d", ps.attackRate);
+                    ImGui::SameLine(); ImGui::TextColored(cGold, "  IAS:"); ImGui::SameLine(); ImGui::Text("%d", ps.ias);
+
+                    // -- Combat stats (2-column) --
+                    int dsMax = 75 + ps.maxDeadlyStrike;
+                    if (dsMax > 100) dsMax = 100;
+                    int dsVal = ps.deadlyStrike < dsMax ? ps.deadlyStrike : dsMax;
+
+                    ImGui::TextColored(cGold, "Crushing Blow:"); ImGui::SameLine(); ImGui::Text("%d", ps.crushingBlow);
+                    ImGui::SameLine(col2); ImGui::TextColored(cGold, "Open Wounds:"); ImGui::SameLine(); ImGui::Text("%d%%/+%d", ps.openWounds, ps.deepWounds);
+                    ImGui::TextColored(cGold, "Deadly Strike:"); ImGui::SameLine(); ImGui::Text("%d / %d", dsVal, dsMax);
+                    ImGui::SameLine(col2); ImGui::TextColored(cGold, "Critical Strike:"); ImGui::SameLine(); ImGui::Text("%d", ps.criticalStrike < 75 ? ps.criticalStrike : 75);
+                    ImGui::TextColored(cRed, "Life Leech:"); ImGui::SameLine(); ImGui::TextColored(cRed, "%d", ps.lifeLeech);
+                    ImGui::SameLine(col2); ImGui::TextColored(cBlue, "Mana Leech:"); ImGui::SameLine(); ImGui::TextColored(cBlue, "%d", ps.manaLeech);
+                    ImGui::TextColored(cGold, "Projectile Pierce:"); ImGui::SameLine(); ImGui::Text("%d", ps.piercingAttack + ps.pierce);
+                    ImGui::SameLine(col2); ImGui::TextColored(cGold, "HP/MP per Kill:"); ImGui::SameLine();
+                    ImGui::TextColored(cRed, "%d", ps.lifePerKill); ImGui::SameLine(); ImGui::Text("/"); ImGui::SameLine();
+                    ImGui::TextColored(cBlue, "%d", ps.manaPerKill);
+
+                    ImGui::Separator();
+
+                    // -- Elemental damage (single line) --
+                    auto applyMastery = [](int val, int mastery) { return val + (val * mastery / 100); };
+                    int fMin = applyMastery(ps.minFireDmg, ps.fireMastery), fMax = applyMastery(ps.maxFireDmg, ps.fireMastery);
+                    int cMin = applyMastery(ps.minColdDmg, ps.coldMastery), cMax = applyMastery(ps.maxColdDmg, ps.coldMastery);
+                    int lMin = applyMastery(ps.minLightDmg, ps.lightMastery), lMax = applyMastery(ps.maxLightDmg, ps.lightMastery);
+                    int pMin = applyMastery(ps.minPoisonDmg, ps.poisonMastery), pMax = applyMastery(ps.maxPoisonDmg, ps.poisonMastery);
+                    int pLen = ps.poisonLenOverride > 0 ? ps.poisonLenOverride : ps.poisonLength;
+                    int mMin = applyMastery(ps.minMagicDmg, ps.magicMastery), mMax = applyMastery(ps.maxMagicDmg, ps.magicMastery);
+
+                    ImGui::TextColored(cGold, "Dmg:"); ImGui::SameLine(); ImGui::Text("+%d", ps.addedDamage);
+                    ImGui::SameLine(); ImGui::TextColored(cRed, "  Fire:"); ImGui::SameLine(); ImGui::TextColored(cRed, "%d-%d", fMin, fMax);
+                    ImGui::SameLine(); ImGui::TextColored(cBlue, "  Cold:"); ImGui::SameLine(); ImGui::TextColored(cBlue, "%d-%d", cMin, cMax);
+                    ImGui::SameLine(); ImGui::TextColored(cYellow, "  Ltng:"); ImGui::SameLine(); ImGui::TextColored(cYellow, "%d-%d", lMin, lMax);
+                    ImGui::SameLine(); ImGui::TextColored(cGreen, "  Psn:"); ImGui::SameLine();
+                    if (pLen > 0) ImGui::TextColored(cGreen, "%d-%d/%.1fs", (int)(pMin / 256.0 * pLen), (int)(pMax / 256.0 * pLen), pLen / 25.0);
+                    else ImGui::TextColored(cGreen, "0-0");
+                    ImGui::SameLine(); ImGui::TextColored(cPurple, "  Mag:"); ImGui::SameLine(); ImGui::TextColored(cPurple, "%d-%d", mMin, mMax);
+
+                    ImGui::Separator();
+
+                    // -- MF / GF / Stash Gold (single line) --
+                    ImGui::TextColored(cBlue, "Magic Find:"); ImGui::SameLine(); ImGui::TextColored(cBlue, "%d", ps.mf);
+                    ImGui::SameLine(); ImGui::TextColored(cYellow, "  Gold Find:"); ImGui::SameLine(); ImGui::TextColored(cYellow, "%d", ps.gf);
+                    ImGui::SameLine(); ImGui::TextColored(cYellow, "  Stash Gold:"); ImGui::SameLine(); ImGui::TextColored(cYellow, "%d", ps.goldStash);
+
+                    // -- HP / Mana / Stamina bars (single row) --
+                    ImGui::Separator();
+                    {
+                        int hp = ps.hp >> 8, maxHp = ps.maxHp >> 8;
+                        int mp = ps.mana >> 8, maxMp = ps.maxMana >> 8;
+                        int stam = ps.stamina >> 8, maxStam = ps.maxStamina >> 8;
+                        float barW = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
+
+                        char hpLabel[32]; snprintf(hpLabel, sizeof(hpLabel), "HP: %d/%d", hp, maxHp);
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
+                        ImGui::ProgressBar(maxHp > 0 ? (float)hp / maxHp : 0, ImVec2(barW, 0), hpLabel);
+                        ImGui::PopStyleColor();
+
+                        ImGui::SameLine();
+                        char mpLabel[32]; snprintf(mpLabel, sizeof(mpLabel), "MP: %d/%d", mp, maxMp);
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.1f, 0.2f, 0.8f, 1.0f));
+                        ImGui::ProgressBar(maxMp > 0 ? (float)mp / maxMp : 0, ImVec2(barW, 0), mpLabel);
+                        ImGui::PopStyleColor();
+
+                        ImGui::SameLine();
+                        char stamLabel[32]; snprintf(stamLabel, sizeof(stamLabel), "Stam: %d/%d", stam, maxStam);
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.6f, 0.1f, 1.0f));
+                        ImGui::ProgressBar(maxStam > 0 ? (float)stam / maxStam : 0, ImVec2(barW, 0), stamLabel);
+                        ImGui::PopStyleColor();
+                    }
+
+                    // -- Belt --
+                    ImGui::Separator();
+                    ImGui::TextColored(cGold, "Belt:");
                     auto belt = GameState::GetBeltState();
                     for (int row = 0; row < belt.rows; ++row) {
                         for (int col = 0; col < belt.columns; ++col) {

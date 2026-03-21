@@ -190,37 +190,111 @@ namespace {
             auto ps = GameState::GetPlayerState();
             const char* classNames[] = {"Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"};
             const char* className = (ps.classId >= 0 && ps.classId <= 6) ? classNames[ps.classId] : "Unknown";
+            const char* diffNames[] = {"Normal", "Nightmare", "Hell"};
+            const char* diff = (ps.difficulty >= 0 && ps.difficulty <= 2) ? diffNames[ps.difficulty] : "Unknown";
+
+            // Apply mastery to elemental damage for display
+            auto applyMastery = [](int val, int mastery) { return val + (val * mastery / 100); };
+            int pLen = ps.poisonLenOverride > 0 ? ps.poisonLenOverride : ps.poisonLength;
+
+            // Build breakpoint arrays
+            auto bpToJson = [](const GameState::PlayerState::BreakpointInfo& bp) {
+                json j = {
+                    {"label", bp.label},
+                    {"current_value", bp.currentValue},
+                    {"active_index", bp.activeIndex}
+                };
+                json vals = json::array();
+                for (int i = 0; i < bp.count; i++) vals.push_back(bp.values[i]);
+                j["thresholds"] = vals;
+                return j;
+            };
 
             json info = {
                 {"name", ps.name},
                 {"class", className},
                 {"class_id", ps.classId},
                 {"level", ps.level},
+                {"difficulty", diff},
+                {"area", ps.area},
+                {"area_name", ps.areaName},
+                {"act", ps.act + 1},
+                {"position", {{"x", ps.x}, {"y", ps.y}}},
+                {"players", ps.playerCount},
+                {"xp_pct_to_next", ps.xpPctToNext},
+                {"additional_xp", ps.addXp},
                 {"hp", ps.hp >> 8},
                 {"max_hp", ps.maxHp >> 8},
                 {"mana", ps.mana >> 8},
                 {"max_mana", ps.maxMana >> 8},
                 {"stamina", ps.stamina >> 8},
                 {"max_stamina", ps.maxStamina >> 8},
-                {"position", {{"x", ps.x}, {"y", ps.y}}},
-                {"area", ps.area},
-                {"act", ps.act + 1},
                 {"gold", ps.gold},
                 {"gold_stash", ps.goldStash},
-                {"stats", {
-                    {"fcr", ps.fcr},
-                    {"fhr", ps.fhr},
-                    {"fbr", ps.fbr},
-                    {"ias", ps.ias},
-                    {"frw", ps.frw},
-                    {"mf", ps.mf}
-                }},
                 {"resistances", {
-                    {"fire", ps.fireRes},
-                    {"cold", ps.coldRes},
-                    {"lightning", ps.lightRes},
-                    {"poison", ps.poisonRes}
-                }}
+                    {"fire", {{"value", ps.fireRes + ps.resPenalty}, {"max", ps.maxFireRes}}},
+                    {"cold", {{"value", ps.coldRes + ps.resPenalty}, {"max", ps.maxColdRes}}},
+                    {"lightning", {{"value", ps.lightRes + ps.resPenalty}, {"max", ps.maxLightRes}}},
+                    {"poison", {{"value", ps.poisonRes + ps.resPenalty}, {"max", ps.maxPoisonRes}}},
+                    {"curse", {{"value", ps.curseRes < 75 ? ps.curseRes : 75}, {"max", 75}}},
+                    {"penalty", ps.resPenalty}
+                }},
+                {"absorption", {
+                    {"fire", {{"flat", ps.fireAbsorb}, {"pct", ps.fireAbsorbPct}}},
+                    {"cold", {{"flat", ps.coldAbsorb}, {"pct", ps.coldAbsorbPct}}},
+                    {"lightning", {{"flat", ps.lightAbsorb}, {"pct", ps.lightAbsorbPct}}},
+                    {"magic", {{"flat", ps.magicAbsorb}, {"pct", ps.magicAbsorbPct}}}
+                }},
+                {"damage_reduction", {
+                    {"physical", {{"flat", ps.dmgReduction}, {"pct", ps.dmgReductionPct}}},
+                    {"magic", {{"flat", ps.magDmgReduction}, {"pct", ps.magDmgReductionPct}}}
+                }},
+                {"attacker_takes_damage", {{"physical", ps.attackerTakesDmg}, {"lightning", ps.attackerTakesLtng}}},
+                {"elemental_mastery", {
+                    {"fire", ps.fireMastery}, {"cold", ps.coldMastery},
+                    {"lightning", ps.lightMastery}, {"poison", ps.poisonMastery}, {"magic", ps.magicMastery}
+                }},
+                {"elemental_pierce", {
+                    {"fire", ps.firePierce}, {"cold", ps.coldPierce},
+                    {"lightning", ps.lightPierce}, {"poison", ps.poisonPierce}, {"magic", ps.magicPierce}
+                }},
+                {"attack", {
+                    {"dex_ar", ps.dexterity * 5}, {"equip_ar", ps.attackRating},
+                    {"total_ar", ps.dexterity * 5 + ps.attackRating},
+                    {"dex_def", ps.dexterity / 4}, {"equip_def", ps.defense},
+                    {"total_def", ps.dexterity / 4 + ps.defense},
+                    {"min_dmg_1h", ps.minDmg}, {"max_dmg_1h", ps.maxDmg},
+                    {"min_dmg_2h", ps.minDmg2}, {"max_dmg_2h", ps.maxDmg2}
+                }},
+                {"rates", {
+                    {"fcr", ps.fcr}, {"fhr", ps.fhr}, {"fbr", ps.fbr},
+                    {"ias", ps.ias}, {"frw", ps.frw}, {"attack_rate", ps.attackRate}
+                }},
+                {"breakpoints", {
+                    {"skill_name", ps.bpSkillName},
+                    {"fcr", bpToJson(ps.bpFCR)},
+                    {"fhr", bpToJson(ps.bpFHR)}
+                }},
+                {"combat", {
+                    {"crushing_blow", ps.crushingBlow},
+                    {"open_wounds", ps.openWounds}, {"deep_wounds", ps.deepWounds},
+                    {"deadly_strike", ps.deadlyStrike}, {"max_deadly_strike", 75 + ps.maxDeadlyStrike},
+                    {"critical_strike", ps.criticalStrike < 75 ? ps.criticalStrike : 75},
+                    {"life_leech", ps.lifeLeech}, {"mana_leech", ps.manaLeech},
+                    {"projectile_pierce", ps.piercingAttack + ps.pierce},
+                    {"life_per_kill", ps.lifePerKill}, {"mana_per_kill", ps.manaPerKill}
+                }},
+                {"elemental_damage", {
+                    {"added", ps.addedDamage},
+                    {"fire", {{"min", applyMastery(ps.minFireDmg, ps.fireMastery)}, {"max", applyMastery(ps.maxFireDmg, ps.fireMastery)}}},
+                    {"cold", {{"min", applyMastery(ps.minColdDmg, ps.coldMastery)}, {"max", applyMastery(ps.maxColdDmg, ps.coldMastery)}}},
+                    {"lightning", {{"min", applyMastery(ps.minLightDmg, ps.lightMastery)}, {"max", applyMastery(ps.maxLightDmg, ps.lightMastery)}}},
+                    {"poison", {{"min", (int)(applyMastery(ps.minPoisonDmg, ps.poisonMastery) / 256.0 * pLen)},
+                               {"max", (int)(applyMastery(ps.maxPoisonDmg, ps.poisonMastery) / 256.0 * pLen)},
+                               {"duration", pLen / 25.0}}},
+                    {"magic", {{"min", applyMastery(ps.minMagicDmg, ps.magicMastery)}, {"max", applyMastery(ps.maxMagicDmg, ps.magicMastery)}}}
+                }},
+                {"find", {{"magic_find", ps.mf}, {"gold_find", ps.gf}}}
             };
 
             return {

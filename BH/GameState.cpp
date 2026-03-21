@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <map>
+#include <vector>
 
 namespace {
     std::mutex g_mutex;
@@ -44,28 +46,234 @@ namespace {
             strncpy_s(ps.name, pPlayer->pPlayerData->szName, sizeof(ps.name) - 1);
         }
 
-        ps.level = D2COMMON_GetUnitStat(pPlayer, STAT_LEVEL, 0);
-        ps.hp = D2COMMON_GetUnitStat(pPlayer, STAT_HP, 0);
-        ps.maxHp = D2COMMON_GetUnitStat(pPlayer, STAT_MAXHP, 0);
-        ps.mana = D2COMMON_GetUnitStat(pPlayer, STAT_MANA, 0);
-        ps.maxMana = D2COMMON_GetUnitStat(pPlayer, STAT_MAXMANA, 0);
-        ps.stamina = D2COMMON_GetUnitStat(pPlayer, STAT_STAMINA, 0);
-        ps.maxStamina = D2COMMON_GetUnitStat(pPlayer, STAT_MAXSTAMINA, 0);
-        ps.gold = D2COMMON_GetUnitStat(pPlayer, STAT_GOLD, 0);
-        ps.goldStash = D2COMMON_GetUnitStat(pPlayer, STAT_GOLDBANK, 0);
+        // Helper macro to reduce boilerplate
+        #define GS(stat) D2COMMON_GetUnitStat(pPlayer, stat, 0)
 
-        ps.fcr = D2COMMON_GetUnitStat(pPlayer, STAT_FASTERCAST, 0);
-        ps.fhr = D2COMMON_GetUnitStat(pPlayer, STAT_FASTERHITRECOVERY, 0);
-        ps.fbr = D2COMMON_GetUnitStat(pPlayer, STAT_FASTERBLOCK, 0);
-        ps.ias = D2COMMON_GetUnitStat(pPlayer, STAT_IAS, 0);
-        ps.frw = D2COMMON_GetUnitStat(pPlayer, STAT_FASTERRUNWALK, 0);
-        ps.mf = D2COMMON_GetUnitStat(pPlayer, STAT_MAGICFIND, 0);
+        // Core
+        ps.level = GS(STAT_LEVEL);
+        ps.hp = GS(STAT_HP);
+        ps.maxHp = GS(STAT_MAXHP);
+        ps.mana = GS(STAT_MANA);
+        ps.maxMana = GS(STAT_MAXMANA);
+        ps.stamina = GS(STAT_STAMINA);
+        ps.maxStamina = GS(STAT_MAXSTAMINA);
+        ps.gold = GS(STAT_GOLD);
+        ps.goldStash = GS(STAT_GOLDBANK);
+        ps.addXp = GS(STAT_ADDEXPERIENCE);
 
-        ps.fireRes = D2COMMON_GetUnitStat(pPlayer, STAT_FIRERESIST, 0);
-        ps.coldRes = D2COMMON_GetUnitStat(pPlayer, STAT_COLDRESIST, 0);
-        ps.lightRes = D2COMMON_GetUnitStat(pPlayer, STAT_LIGHTNINGRESIST, 0);
-        ps.poisonRes = D2COMMON_GetUnitStat(pPlayer, STAT_POISONRESIST, 0);
+        // Resistances (raw — penalty applied in display)
+        ps.fireRes = GS(STAT_FIRERESIST);
+        ps.maxFireRes = GS(STAT_MAXFIRERESIST) + 75;
+        ps.coldRes = GS(STAT_COLDRESIST);
+        ps.maxColdRes = GS(STAT_MAXCOLDRESIST) + 75;
+        ps.lightRes = GS(STAT_LIGHTNINGRESIST);
+        ps.maxLightRes = GS(STAT_MAXLIGHTNINGRESIST) + 75;
+        ps.poisonRes = GS(STAT_POISONRESIST);
+        ps.maxPoisonRes = GS(STAT_MAXPOISONRESIST) + 75;
+        ps.curseRes = GS(STAT_CURSE_EFFECTIVENESS);
+        ps.curseLenReduce = GS(STAT_CURSERESISTANCE);
+        ps.poisonLenReduce = GS(STAT_POISONLENGTHREDUCTION);
+        ps.halfFreeze = GS(STAT_HALFFREEZEDURATION);
+        ps.cannotBeFrozen = GS(STAT_CANNOTBEFROZEN);
 
+        // Cap max resistances
+        if (ps.maxFireRes > MAX_PLAYER_RESISTANCE) ps.maxFireRes = MAX_PLAYER_RESISTANCE;
+        if (ps.maxColdRes > MAX_PLAYER_RESISTANCE) ps.maxColdRes = MAX_PLAYER_RESISTANCE;
+        if (ps.maxLightRes > MAX_PLAYER_RESISTANCE) ps.maxLightRes = MAX_PLAYER_RESISTANCE;
+        if (ps.maxPoisonRes > MAX_PLAYER_RESISTANCE) ps.maxPoisonRes = MAX_PLAYER_RESISTANCE;
+
+        // Absorption
+        ps.fireAbsorb = GS(STAT_FIREABSORB);        ps.fireAbsorbPct = GS(STAT_FIREABSORBPERCENT);
+        ps.coldAbsorb = GS(STAT_COLDABSORB);        ps.coldAbsorbPct = GS(STAT_COLDABSORBPERCENT);
+        ps.lightAbsorb = GS(STAT_LIGHTNINGABSORB);  ps.lightAbsorbPct = GS(STAT_LIGHTNINGABSORBPERCENT);
+        ps.magicAbsorb = GS(STAT_MAGICABSORB);      ps.magicAbsorbPct = GS(STAT_MAGICABSORBPERCENT);
+
+        // Damage reduction
+        ps.dmgReduction = GS(STAT_DMGREDUCTION);        ps.dmgReductionPct = GS(STAT_DMGREDUCTIONPCT);
+        ps.magDmgReduction = GS(STAT_MAGICDMGREDUCTION); ps.magDmgReductionPct = GS(STAT_MAGICDMGREDUCTIONPCT);
+        ps.attackerTakesDmg = GS(STAT_ATTACKERTAKESDAMAGE);
+        ps.attackerTakesLtng = GS(STAT_ATTACKERTAKESLTNGDMG);
+
+        // Elemental mastery & pierce
+        ps.fireMastery = GS(STAT_FIREMASTERY);      ps.firePierce = GS(STAT_PSENEMYFIRERESREDUC);
+        ps.coldMastery = GS(STAT_COLDMASTERY);      ps.coldPierce = GS(STAT_PSENEMYCOLDRESREDUC);
+        ps.lightMastery = GS(STAT_LIGHTNINGMASTERY); ps.lightPierce = GS(STAT_PSENEMYLIGHTNRESREDUC);
+        ps.poisonMastery = GS(STAT_POISONMASTERY);  ps.poisonPierce = GS(STAT_PSENEMYPSNRESREDUC);
+        ps.magicMastery = GS(STAT_PASSIVEMAGICDMGMASTERY); ps.magicPierce = GS(STAT_PASSIVEMAGICRESREDUC);
+
+        // Attack / defense
+        ps.dexterity = GS(STAT_DEXTERITY);
+        ps.attackRating = GS(STAT_ATTACKRATING);
+        ps.defense = GS(STAT_DEFENSE);
+        ps.minDmg = GS(STAT_MINIMUMDAMAGE);         ps.maxDmg = GS(STAT_MAXIMUMDAMAGE);
+        ps.minDmg2 = GS(STAT_SECONDARYMINIMUMDAMAGE); ps.maxDmg2 = GS(STAT_SECONDARYMAXIMUMDAMAGE);
+
+        // Rates
+        ps.fcr = GS(STAT_FASTERCAST);    ps.fhr = GS(STAT_FASTERHITRECOVERY);
+        ps.fbr = GS(STAT_FASTERBLOCK);   ps.ias = GS(STAT_IAS);
+        ps.frw = GS(STAT_FASTERRUNWALK); ps.attackRate = GS(STAT_ATTACKRATE);
+
+        // Combat
+        ps.crushingBlow = GS(STAT_CRUSHINGBLOW);
+        ps.openWounds = GS(STAT_OPENWOUNDS);     ps.deepWounds = GS(STAT_DEEP_WOUNDS);
+        ps.deadlyStrike = GS(STAT_DEADLYSTRIKE);  ps.maxDeadlyStrike = GS(STAT_MAXDEADLYSTRIKE);
+        ps.criticalStrike = GS(STAT_CRITICALSTRIKE);
+        ps.lifeLeech = GS(STAT_LIFELEECH);        ps.manaLeech = GS(STAT_MANALEECH);
+        ps.piercingAttack = GS(STAT_PIERCINGATTACK); ps.pierce = GS(STAT_PIERCE);
+        ps.lifePerKill = GS(STAT_LIFEAFTEREACHKILL); ps.manaPerKill = GS(STAT_MANAAFTEREACHKILL);
+
+        // Elemental damage
+        ps.minFireDmg = GS(STAT_MINIMUMFIREDAMAGE);     ps.maxFireDmg = GS(STAT_MAXIMUMFIREDAMAGE);
+        ps.minColdDmg = GS(STAT_MINIMUMCOLDDAMAGE);     ps.maxColdDmg = GS(STAT_MAXIMUMCOLDDAMAGE);
+        ps.minLightDmg = GS(STAT_MINIMUMLIGHTNINGDAMAGE); ps.maxLightDmg = GS(STAT_MAXIMUMLIGHTNINGDAMAGE);
+        ps.minPoisonDmg = GS(STAT_MINIMUMPOISONDAMAGE); ps.maxPoisonDmg = GS(STAT_MAXIMUMPOISONDAMAGE);
+        ps.poisonLength = GS(STAT_POISONDAMAGELENGTH);
+        ps.poisonLenOverride = GS(STAT_SKILLPOISONOVERRIDELEN);
+        ps.minMagicDmg = GS(STAT_MINIMUMMAGICALDAMAGE); ps.maxMagicDmg = GS(STAT_MAXIMUMMAGICALDAMAGE);
+        ps.addedDamage = GS(STAT_ADDSDAMAGE);
+
+        // Breakpoints — FCR
+        {
+            // FCR table per class (matching StatsDisplay.cpp)
+            static const std::map<int, std::vector<int>> fcrTables = {
+                { CLASS_AMA, { 7, 14, 22, 32, 48, 68, 99, 152 } },
+                { CLASS_SOR, { 9, 20, 37, 63, 105, 200 } },
+                { CLASS_BAR, { 9, 20, 37, 63, 105, 200 } },
+                { CLASS_NEC, { 9, 18, 30, 48, 75, 125 } },
+                { CLASS_PAL, { 9, 18, 30, 48, 75, 125 } },
+                { CLASS_ASN, { 8, 16, 27, 42, 65, 102, 174 } },
+                { CLASS_DRU, { 4, 10, 19, 30, 46, 68, 99, 163 } },
+            };
+
+            int fcrKey = pPlayer->dwTxtFileNo;
+            // Check for lightning skills (Chain Lightning, Frozen Orb) which use different FCR
+            try {
+                if (pPlayer->pInfo && pPlayer->pInfo->pRightSkill &&
+                    pPlayer->pInfo->pRightSkill->pSkillInfo) {
+                    int skillId = pPlayer->pInfo->pRightSkill->pSkillInfo->wSkillId;
+                    if (skillId == 53 || skillId == 64) fcrKey = 143;
+                }
+                if (D2COMMON_GetUnitState(pPlayer, 139)) fcrKey = 139;
+                if (D2COMMON_GetUnitState(pPlayer, 140)) fcrKey = 140;
+            } catch (...) {}
+
+            auto it = fcrTables.find(fcrKey);
+            // Fall back to class if alias not found
+            if (it == fcrTables.end()) it = fcrTables.find(pPlayer->dwTxtFileNo);
+
+            if (it != fcrTables.end()) {
+                const auto& bps = it->second;
+                ps.bpFCR.currentValue = ps.fcr;
+                strncpy_s(ps.bpFCR.label, "FCR", sizeof(ps.bpFCR.label));
+                ps.bpFCR.count = (int)bps.size();
+                if (ps.bpFCR.count > 16) ps.bpFCR.count = 16;
+                ps.bpFCR.activeIndex = -1;
+                for (int i = 0; i < ps.bpFCR.count; i++) {
+                    ps.bpFCR.values[i] = bps[i];
+                    if (ps.fcr >= bps[i]) ps.bpFCR.activeIndex = i;
+                }
+            }
+        }
+
+        // Breakpoints — FHR
+        {
+            static const std::map<int, std::vector<int>> fhrTables = {
+                { CLASS_AMA, { 6, 13, 20, 32, 52, 86, 174, 600 } },
+                { CLASS_SOR, { 5, 9, 14, 20, 30, 42, 60, 86, 142, 280 } },
+                { CLASS_NEC, { 5, 10, 16, 26, 39, 56, 86, 152, 377 } },
+                { CLASS_DRU, { 5, 10, 16, 26, 39, 56, 86, 152, 377 } },
+                { CLASS_BAR, { 7, 15, 27, 48, 86, 200 } },
+                { CLASS_ASN, { 7, 15, 27, 48, 86, 200 } },
+                { CLASS_PAL, { 7, 15, 27, 48, 86, 200 } },
+            };
+
+            int fhrKey = pPlayer->dwTxtFileNo;
+            try {
+                if (D2COMMON_GetUnitState(pPlayer, 139)) fhrKey = 139;
+                if (D2COMMON_GetUnitState(pPlayer, 140)) fhrKey = 140;
+            } catch (...) {}
+
+            auto it = fhrTables.find(fhrKey);
+            if (it == fhrTables.end()) it = fhrTables.find(pPlayer->dwTxtFileNo);
+
+            if (it != fhrTables.end()) {
+                const auto& bps = it->second;
+                ps.bpFHR.currentValue = ps.fhr;
+                strncpy_s(ps.bpFHR.label, "FHR", sizeof(ps.bpFHR.label));
+                ps.bpFHR.count = (int)bps.size();
+                if (ps.bpFHR.count > 16) ps.bpFHR.count = 16;
+                ps.bpFHR.activeIndex = -1;
+                for (int i = 0; i < ps.bpFHR.count; i++) {
+                    ps.bpFHR.values[i] = bps[i];
+                    if (ps.fhr >= bps[i]) ps.bpFHR.activeIndex = i;
+                }
+            }
+        }
+
+        // Breakpoint skill name — wrapped in safety checks since data tables
+        // may not be initialized during loading screens
+        try {
+            if (pPlayer->pInfo && pPlayer->pInfo->pRightSkill &&
+                pPlayer->pInfo->pRightSkill->pSkillInfo) {
+                int skillDesc = pPlayer->pInfo->pRightSkill->pSkillInfo->wSkillDesc;
+                sgptDataTable* pDataTbl = *p_D2COMMON_sgptDataTable;
+                if (skillDesc > 0 && pDataTbl && pDataTbl->pSkillDescTxt) {
+                    SkillDescTxt* pSkillDescTxt = &pDataTbl->pSkillDescTxt[skillDesc];
+                    if (pSkillDescTxt && pSkillDescTxt->wStrName > 0) {
+                        wchar_t* wName = GetTblEntryByIndex(pSkillDescTxt->wStrName, TBLOFFSET_STRING);
+                        if (wName) {
+                            WideCharToMultiByte(CP_UTF8, 0, wName, -1, ps.bpSkillName, sizeof(ps.bpSkillName) - 1, nullptr, nullptr);
+                        }
+                    }
+                }
+            }
+        } catch (...) {
+            // Data tables not ready yet — skip skill name
+        }
+
+        // Find
+        ps.mf = GS(STAT_MAGICFIND);
+        ps.gf = GS(STAT_GOLDFIND);
+
+        // XP
+        ps.currentXp = GS(STAT_EXP);
+        ps.nextLevelXp = GS(STAT_NEXTEXPERIENCE);
+        if (ps.nextLevelXp > 0 && ps.currentXp > 0) {
+            // STAT_NEXTEXPERIENCE gives XP needed FOR next level (total)
+            // STAT_LASTEXPERIENCE would give previous level total
+            // For percentage: (current - lastLevelXp) / (nextLevelXp - lastLevelXp) * 100
+            int lastLevelXp = D2COMMON_GetUnitStat(pPlayer, STAT_LASTEXPERIENCE, 0);
+            if (ps.nextLevelXp > lastLevelXp) {
+                ps.xpPctToNext = (float)(ps.currentXp - lastLevelXp) / (float)(ps.nextLevelXp - lastLevelXp) * 100.0f;
+            }
+        }
+
+        #undef GS
+
+        // Difficulty & expansion
+        ps.difficulty = D2CLIENT_GetDifficulty();
+        int xPacMultiplier = 1;
+        BnetData* pBnData = (*p_D2LAUNCH_BnData);
+        if (pBnData) {
+            ps.isExpansion = (pBnData->nCharFlags & PLAYER_TYPE_EXPANSION) != 0;
+            xPacMultiplier = ps.isExpansion ? 2 : 1;
+            ps.charClassNum = pBnData->nCharClass;
+        }
+
+        // Resistance penalty based on difficulty
+        int resPenalties[3] = { RES_PENALTY_CLS_NORM, RES_PENALTY_CLS_NM, RES_PENALTY_CLS_HELL };
+        ps.resPenalty = resPenalties[ps.difficulty] * xPacMultiplier;
+
+        // Player count (walk roster list)
+        ps.playerCount = 0;
+        RosterUnit* pRoster = *p_D2CLIENT_PlayerUnitList;
+        while (pRoster) {
+            ps.playerCount++;
+            pRoster = pRoster->pNext;
+        }
+        if (ps.playerCount < 1) ps.playerCount = 1;
+
+        // Position
         if (pPlayer->pPath) {
             ps.x = pPlayer->pPath->xPos;
             ps.y = pPlayer->pPath->yPos;
@@ -78,6 +286,16 @@ namespace {
         }
 
         ps.act = pPlayer->dwAct;
+
+        // Area name from level data
+        try {
+            if (ps.area > 0) {
+                wchar_t* wName = D2CLIENT_GetLevelName(ps.area);
+                if (wName) {
+                    WideCharToMultiByte(CP_UTF8, 0, wName, -1, ps.areaName, sizeof(ps.areaName) - 1, nullptr, nullptr);
+                }
+            }
+        } catch (...) {}
 
         std::lock_guard<std::mutex> lock(g_mutex);
         g_player = ps;
@@ -248,9 +466,15 @@ namespace GameState {
         g_ready = IsGameReady();
         if (!g_ready) return;
 
-        UpdatePlayerState();
-        UpdateBeltState();
-        UpdateNearbyUnits();
+        __try {
+            UpdatePlayerState();
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        __try {
+            UpdateBeltState();
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        __try {
+            UpdateNearbyUnits();
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
 
     PlayerState GetPlayerState() {
