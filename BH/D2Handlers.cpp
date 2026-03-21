@@ -6,6 +6,7 @@
 #include "AutoPickup.h"
 #include "GameNav.h"
 #include "GamePause.h"
+#include "MemWatch.h"
 
 #include <iterator>
 
@@ -31,6 +32,7 @@ void GameLoop() {
 	GameState::Update();
 	AutoPotion::Update();
 	AutoPickup::Update();
+	MemWatch::Update();
 	GameNav::CheckPendingExit();
 }
 

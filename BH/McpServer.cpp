@@ -12,6 +12,7 @@
 #include "CrashCatcher.h"
 #include "PatchManager.h"
 #include "GamePause.h"
+#include "MemWatch.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -412,6 +413,39 @@ namespace {
                 }},
                 {"required", json::array()}
             }}
+        });
+
+        tools.push_back({
+            {"name", "add_watch"},
+            {"description", "Add a memory address to the watch list. Monitors for value changes each frame."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Watch name"}}},
+                    {"address", {{"type", "string"}, {"description", "Hex address (e.g., '0x6FAB1234')"}}},
+                    {"type", {{"type", "string"}, {"description", "Value type: 'byte', 'word', 'dword', 'float' (default 'dword')"}}}
+                }},
+                {"required", {"name", "address"}}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "remove_watch"},
+            {"description", "Remove a watch by name, or remove all watches."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Watch name to remove"}}},
+                    {"all", {{"type", "boolean"}, {"description", "Remove all watches"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_watches"},
+            {"description", "Get all watched addresses with current values, previous values, and change counts."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
         tools.push_back({
@@ -1233,6 +1267,67 @@ namespace {
                 {"file", filePath},
                 {"patches", exportData}
             };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "add_watch") {
+            std::string watchName = arguments.value("name", "");
+            std::string addrStr = arguments.value("address", "");
+            std::string typeStr = arguments.value("type", "dword");
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            MemWatch::WatchType wt = MemWatch::WATCH_DWORD;
+            if (typeStr == "byte") wt = MemWatch::WATCH_BYTE;
+            else if (typeStr == "word") wt = MemWatch::WATCH_WORD;
+            else if (typeStr == "float") wt = MemWatch::WATCH_FLOAT;
+
+            if (!MemWatch::AddWatch(watchName, addr, wt)) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed (already exists or bad address)"}}}}, {"isError", true}};
+            }
+
+            char buf[16]; snprintf(buf, sizeof(buf), "0x%08X", addr);
+            json info = {{"status", "added"}, {"name", watchName}, {"address", buf}, {"type", typeStr}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "remove_watch") {
+            if (arguments.value("all", false)) {
+                MemWatch::RemoveAllWatches();
+                return {{"content", {{{"type", "text"}, {"text", "All watches removed"}}}}};
+            }
+            std::string watchName = arguments.value("name", "");
+            if (!MemWatch::RemoveWatch(watchName)) {
+                return {{"content", {{{"type", "text"}, {"text", "Watch not found: " + watchName}}}}, {"isError", true}};
+            }
+            return {{"content", {{{"type", "text"}, {"text", "Watch removed: " + watchName}}}}};
+        }
+
+        if (name == "get_watches") {
+            auto watches = MemWatch::GetWatches();
+            json list = json::array();
+            for (auto& w : watches) {
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", w.address);
+                char curBuf[16]; snprintf(curBuf, sizeof(curBuf), "0x%08X", w.currentValue);
+                char prevBuf[16]; snprintf(prevBuf, sizeof(prevBuf), "0x%08X", w.previousValue);
+
+                json entry = {
+                    {"name", w.name},
+                    {"address", addrBuf},
+                    {"current", curBuf},
+                    {"current_dec", (int)w.currentValue},
+                    {"previous", prevBuf},
+                    {"changed", w.changed},
+                    {"change_count", w.changeCount}
+                };
+
+                if (w.type == MemWatch::WATCH_FLOAT) {
+                    float f; memcpy(&f, &w.currentValue, 4);
+                    entry["current_float"] = f;
+                }
+
+                list.push_back(entry);
+            }
+            json info = {{"count", list.size()}, {"watches", list}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 

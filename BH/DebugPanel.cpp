@@ -7,6 +7,7 @@
 #include "CrashCatcher.h"
 #include "PatchManager.h"
 #include "GamePause.h"
+#include "MemWatch.h"
 #include "BH.h"
 
 #include <windows.h>
@@ -816,7 +817,46 @@ namespace {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Memory")) {
-                ImGui::Text("Memory read/write and watch list will appear here.");
+                ImVec4 cGold4(0.85f, 0.72f, 0.45f, 1.0f);
+                ImVec4 cGreen4(0.4f, 1.0f, 0.4f, 1.0f);
+                ImVec4 cRed4(1.0f, 0.4f, 0.4f, 1.0f);
+                ImVec4 cYellow4(1.0f, 1.0f, 0.3f, 1.0f);
+                ImVec4 cGray4(0.6f, 0.6f, 0.6f, 1.0f);
+
+                auto watches = MemWatch::GetWatches();
+                ImGui::TextColored(cGold4, "Watch List: %d", (int)watches.size());
+                if (!watches.empty()) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Clear All##watches")) MemWatch::RemoveAllWatches();
+                }
+
+                if (!watches.empty()) {
+                    if (ImGui::BeginTable("WatchTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Dec", ImGuiTableColumnFlags_WidthFixed, 70 * g_dpiScale);
+                        ImGui::TableSetupColumn("Changes", ImGuiTableColumnFlags_WidthFixed, 60 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (auto& w : watches) {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%s", w.name.c_str());
+                            ImGui::TableNextColumn();
+                            ImGui::Text("0x%08X", w.address);
+                            ImGui::TableNextColumn();
+                            ImGui::TextColored(w.changed ? cYellow4 : cGray4, "0x%08X", w.currentValue);
+                            ImGui::TableNextColumn();
+                            ImGui::Text("%d", (int)w.currentValue);
+                            ImGui::TableNextColumn();
+                            ImGui::TextColored(w.changeCount > 0 ? cYellow4 : cGray4, "%d", w.changeCount);
+                        }
+                        ImGui::EndTable();
+                    }
+                } else {
+                    ImGui::TextColored(cGray4, "No watches. Use MCP add_watch to monitor addresses.");
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Patches")) {

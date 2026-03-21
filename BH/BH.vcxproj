@@ -159,6 +159,7 @@
     <ClCompile Include="PatchManager.cpp" />
     <ClCompile Include="GameNav.cpp" />
     <ClCompile Include="GamePause.cpp" />
+    <ClCompile Include="MemWatch.cpp" />
     <ClCompile Include="HookManager.cpp" />
     <ClCompile Include="AutoPotion.cpp" />
     <ClCompile Include="DebugPanel.cpp" />
@@ -218,6 +219,7 @@
     <ClInclude Include="PatchManager.h" />
     <ClInclude Include="GameNav.h" />
     <ClInclude Include="GamePause.h" />
+    <ClInclude Include="MemWatch.h" />
     <ClInclude Include="HookManager.h" />
     <ClInclude Include="AutoPotion.h" />
     <ClInclude Include="DebugPanel.h" />
