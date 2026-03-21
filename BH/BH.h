@@ -91,9 +91,6 @@ struct BHApp
 		SettingsBool enabled = { false, false };
 		SettingsInt maxDistance = { 15, 15, 1, 40 };
 		SettingsInt cooldownMs = { 250, 250, 100, 5000 };
-		SettingsBool pickHpPotions = { true, true };
-		SettingsBool pickMpPotions = { true, true };
-		SettingsBool pickRejuvs = { true, true };
 		SettingsBool pickTpScrolls = { true, true };
 		SettingsBool pickIdScrolls = { true, true };
 	} autoPickup;

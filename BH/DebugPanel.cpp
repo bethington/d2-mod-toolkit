@@ -81,10 +81,18 @@ namespace {
             nullptr
         };
 
+        // Include arrows and symbols glyph range for icons
+        static const ImWchar glyphRanges[] = {
+            0x0020, 0x00FF, // Basic Latin + Latin Supplement
+            0x2190, 0x21FF, // Arrows (includes refresh ↻ U+21BB)
+            0x2700, 0x27BF, // Dingbats
+            0,
+        };
+
         bool fontLoaded = false;
         for (int i = 0; fontPaths[i]; ++i) {
             if (GetFileAttributesA(fontPaths[i]) != INVALID_FILE_ATTRIBUTES) {
-                io.Fonts->AddFontFromFileTTF(fontPaths[i], fontSize);
+                io.Fonts->AddFontFromFileTTF(fontPaths[i], fontSize, nullptr, glyphRanges);
                 fontLoaded = true;
                 break;
             }
@@ -479,8 +487,9 @@ namespace {
                         auto apc = AutoPotion::GetConfig();
                         bool changed = false;
 
-                        ImGui::TextColored(cGold, "Auto-Potion:"); ImGui::SameLine();
-                        if (ImGui::Checkbox("Enabled", &apc.enabled)) changed = true;
+                        if (ImGui::Checkbox("##apEnable", &apc.enabled)) changed = true;
+                        ImGui::SameLine();
+                        ImGui::TextColored(cGold, "Auto-Potion:");
 
                         if (apc.enabled) {
                             ImGui::SameLine();
@@ -515,8 +524,9 @@ namespace {
                         auto auc = AutoPickup::GetConfig();
                         bool changed = false;
 
-                        ImGui::TextColored(cGold, "Auto-Pickup:"); ImGui::SameLine();
-                        if (ImGui::Checkbox("Enabled##pickup", &auc.enabled)) changed = true;
+                        if (ImGui::Checkbox("##auEnable", &auc.enabled)) changed = true;
+                        ImGui::SameLine();
+                        ImGui::TextColored(cGold, "Auto-Pickup:");
 
                         if (auc.enabled) {
                             ImGui::SameLine();
@@ -525,15 +535,29 @@ namespace {
                             if (ImGui::InputInt("##range", &auc.maxDistance, 0, 0)) changed = true;
                             ImGui::PopItemWidth();
                             ImGui::SameLine();
-                            if (ImGui::Checkbox("HP##pickHP", &auc.pickHpPotions)) changed = true;
-                            ImGui::SameLine();
-                            if (ImGui::Checkbox("MP##pickMP", &auc.pickMpPotions)) changed = true;
-                            ImGui::SameLine();
-                            if (ImGui::Checkbox("Rejuv##pickRJ", &auc.pickRejuvs)) changed = true;
-                            ImGui::SameLine();
                             if (ImGui::Checkbox("TP##pickTP", &auc.pickTpScrolls)) changed = true;
                             ImGui::SameLine();
                             if (ImGui::Checkbox("ID##pickID", &auc.pickIdScrolls)) changed = true;
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("\xe2\x86\xbb##resnap")) { // U+21BB ↻
+                                AutoPickup::ResnapBelt();
+                            }
+                            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Re-snapshot belt layout");
+
+                            // Show snapshot info
+                            auto snap = AutoPickup::GetSnapshot();
+                            if (snap.valid) {
+                                ImGui::SameLine();
+                                ImGui::TextColored(cGray, " Snap:");
+                                for (int c = 0; c < 4; c++) {
+                                    ImGui::SameLine();
+                                    if (snap.preferredCode[c] > 0) {
+                                        ImGui::Text("[%d]", snap.preferredCode[c]);
+                                    } else {
+                                        ImGui::TextColored(cGray, "[--]");
+                                    }
+                                }
+                            }
                         }
 
                         if (changed) {

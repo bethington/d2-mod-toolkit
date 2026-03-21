@@ -196,17 +196,15 @@ namespace {
 
         tools.push_back({
             {"name", "set_auto_pickup"},
-            {"description", "Configure auto-pickup settings. Pass only fields to change."},
+            {"description", "Configure auto-pickup settings. Snapshots belt layout on enable. Pass only fields to change."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
-                    {"enabled", {{"type", "boolean"}, {"description", "Enable/disable auto-pickup"}}},
+                    {"enabled", {{"type", "boolean"}, {"description", "Enable/disable auto-pickup (snapshots belt on enable)"}}},
                     {"max_distance", {{"type", "integer"}, {"description", "Max pickup range in game units (1-40)"}}},
-                    {"pick_hp_potions", {{"type", "boolean"}}},
-                    {"pick_mp_potions", {{"type", "boolean"}}},
-                    {"pick_rejuvs", {{"type", "boolean"}}},
                     {"pick_tp_scrolls", {{"type", "boolean"}, {"description", "Pick up TP scrolls when tome not full"}}},
-                    {"pick_id_scrolls", {{"type", "boolean"}, {"description", "Pick up ID scrolls when tome not full"}}}
+                    {"pick_id_scrolls", {{"type", "boolean"}, {"description", "Pick up ID scrolls when tome not full"}}},
+                    {"resnap", {{"type", "boolean"}, {"description", "Re-snapshot current belt layout"}}}
                 }},
                 {"required", json::array()}
             }}
@@ -568,15 +566,18 @@ namespace {
 
         if (name == "get_auto_pickup") {
             auto cfg = AutoPickup::GetConfig();
+            auto snap = AutoPickup::GetSnapshot();
+            json snapJson = json::array();
+            for (int i = 0; i < 4; i++) snapJson.push_back(snap.preferredCode[i]);
+
             json info = {
                 {"enabled", cfg.enabled},
                 {"max_distance", cfg.maxDistance},
                 {"cooldown_ms", cfg.cooldownMs},
-                {"pick_hp_potions", cfg.pickHpPotions},
-                {"pick_mp_potions", cfg.pickMpPotions},
-                {"pick_rejuvs", cfg.pickRejuvs},
                 {"pick_tp_scrolls", cfg.pickTpScrolls},
-                {"pick_id_scrolls", cfg.pickIdScrolls}
+                {"pick_id_scrolls", cfg.pickIdScrolls},
+                {"belt_snapshot", snapJson},
+                {"snapshot_valid", snap.valid}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
@@ -586,22 +587,25 @@ namespace {
             if (arguments.contains("enabled")) cfg.enabled = arguments["enabled"].get<bool>();
             if (arguments.contains("max_distance")) cfg.maxDistance = arguments["max_distance"].get<int>();
             if (arguments.contains("cooldown_ms")) cfg.cooldownMs = arguments["cooldown_ms"].get<int>();
-            if (arguments.contains("pick_hp_potions")) cfg.pickHpPotions = arguments["pick_hp_potions"].get<bool>();
-            if (arguments.contains("pick_mp_potions")) cfg.pickMpPotions = arguments["pick_mp_potions"].get<bool>();
-            if (arguments.contains("pick_rejuvs")) cfg.pickRejuvs = arguments["pick_rejuvs"].get<bool>();
             if (arguments.contains("pick_tp_scrolls")) cfg.pickTpScrolls = arguments["pick_tp_scrolls"].get<bool>();
             if (arguments.contains("pick_id_scrolls")) cfg.pickIdScrolls = arguments["pick_id_scrolls"].get<bool>();
             AutoPickup::SetConfig(cfg);
+
+            if (arguments.contains("resnap") && arguments["resnap"].get<bool>()) {
+                AutoPickup::ResnapBelt();
+            }
+
+            auto snap = AutoPickup::GetSnapshot();
+            json snapJson = json::array();
+            for (int i = 0; i < 4; i++) snapJson.push_back(snap.preferredCode[i]);
 
             json info = {
                 {"status", "updated"},
                 {"enabled", cfg.enabled},
                 {"max_distance", cfg.maxDistance},
-                {"pick_hp_potions", cfg.pickHpPotions},
-                {"pick_mp_potions", cfg.pickMpPotions},
-                {"pick_rejuvs", cfg.pickRejuvs},
                 {"pick_tp_scrolls", cfg.pickTpScrolls},
-                {"pick_id_scrolls", cfg.pickIdScrolls}
+                {"pick_id_scrolls", cfg.pickIdScrolls},
+                {"belt_snapshot", snapJson}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }

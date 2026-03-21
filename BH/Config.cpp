@@ -301,9 +301,6 @@ void Config::SaveConfig()
 	jsonAutoPickup["enabled"] = App.autoPickup.enabled.value;
 	jsonAutoPickup["max_distance"] = App.autoPickup.maxDistance.value;
 	jsonAutoPickup["cooldown_ms"] = App.autoPickup.cooldownMs.value;
-	jsonAutoPickup["pick_hp_potions"] = App.autoPickup.pickHpPotions.value;
-	jsonAutoPickup["pick_mp_potions"] = App.autoPickup.pickMpPotions.value;
-	jsonAutoPickup["pick_rejuvs"] = App.autoPickup.pickRejuvs.value;
 	jsonAutoPickup["pick_tp_scrolls"] = App.autoPickup.pickTpScrolls.value;
 	jsonAutoPickup["pick_id_scrolls"] = App.autoPickup.pickIdScrolls.value;
 	App.jsonConfig["auto_pickup"] = jsonAutoPickup;
@@ -470,9 +467,6 @@ void Config::LoadConfig()
 	App.autoPickup.enabled.value = GetBool("/auto_pickup"_json_pointer, "enabled", App.autoPickup.enabled);
 	App.autoPickup.maxDistance.value = GetInt("/auto_pickup"_json_pointer, "max_distance", App.autoPickup.maxDistance);
 	App.autoPickup.cooldownMs.value = GetInt("/auto_pickup"_json_pointer, "cooldown_ms", App.autoPickup.cooldownMs);
-	App.autoPickup.pickHpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_hp_potions", App.autoPickup.pickHpPotions);
-	App.autoPickup.pickMpPotions.value = GetBool("/auto_pickup"_json_pointer, "pick_mp_potions", App.autoPickup.pickMpPotions);
-	App.autoPickup.pickRejuvs.value = GetBool("/auto_pickup"_json_pointer, "pick_rejuvs", App.autoPickup.pickRejuvs);
 	App.autoPickup.pickTpScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_tp_scrolls", App.autoPickup.pickTpScrolls);
 	App.autoPickup.pickIdScrolls.value = GetBool("/auto_pickup"_json_pointer, "pick_id_scrolls", App.autoPickup.pickIdScrolls);
 
