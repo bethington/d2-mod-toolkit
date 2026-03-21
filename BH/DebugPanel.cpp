@@ -487,9 +487,8 @@ namespace {
                         auto apc = AutoPotion::GetConfig();
                         bool changed = false;
 
+                        ImGui::TextColored(cGold, "Auto-Potion:"); ImGui::SameLine();
                         if (ImGui::Checkbox("##apEnable", &apc.enabled)) changed = true;
-                        ImGui::SameLine();
-                        ImGui::TextColored(cGold, "Auto-Potion:");
 
                         if (apc.enabled) {
                             ImGui::SameLine();
@@ -524,9 +523,8 @@ namespace {
                         auto auc = AutoPickup::GetConfig();
                         bool changed = false;
 
+                        ImGui::TextColored(cGold, "Auto-Pickup:"); ImGui::SameLine();
                         if (ImGui::Checkbox("##auEnable", &auc.enabled)) changed = true;
-                        ImGui::SameLine();
-                        ImGui::TextColored(cGold, "Auto-Pickup:");
 
                         if (auc.enabled) {
                             ImGui::SameLine();
