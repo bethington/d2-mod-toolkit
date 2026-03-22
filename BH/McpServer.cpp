@@ -245,6 +245,69 @@ namespace {
         return ok;
     }
 
+    // Stat ID -> human-readable name (covers the most common/important stats)
+    static const char* GetStatName(int statId) {
+        static const char* names[] = {
+            "strength", "energy", "dexterity", "vitality",         // 0-3
+            "stat_points", "skill_points", "life", "max_life",     // 4-7
+            "mana", "max_mana", "stamina", "max_stamina",          // 8-11
+            "level", "experience", "gold", "gold_stash",           // 12-15
+            "enhanced_defense", "enhanced_max_dmg", "enhanced_min_dmg", "attack_rating", // 16-19
+            "to_block", "min_dmg", "max_dmg", "min_dmg_2h", "max_dmg_2h", // 20-24
+            "enhanced_damage", "mana_recovery", "mana_recovery_bonus", "stamina_recovery", // 25-28
+            "last_exp", "next_exp", "defense", "defense_vs_missile", "defense_vs_melee", // 29-33
+            "dmg_reduction", "magic_dmg_reduction", "dmg_reduction_pct", "magic_dmg_reduction_pct", "max_magic_dmg_reduction_pct", // 34-38
+            "fire_resist", "max_fire_resist", "lightning_resist", "max_lightning_resist", // 39-42
+            "cold_resist", "max_cold_resist", "poison_resist", "max_poison_resist", // 43-46
+            "damage_aura", "min_fire_dmg", "max_fire_dmg", "min_light_dmg", "max_light_dmg", // 47-51
+            "min_magic_dmg", "max_magic_dmg", "min_cold_dmg", "max_cold_dmg", "cold_duration", // 52-56
+            "min_poison_dmg", "max_poison_dmg", "poison_duration", // 57-59
+            "life_leech", "max_life_leech", "mana_leech", "max_mana_leech", // 60-63
+            "min_stamina_drain", "max_stamina_drain", "stun_length", "velocity", // 64-67
+            "attack_rate", "other_anim_rate", "ammo_quantity", "value", // 68-71
+            "durability", "max_durability", "replenish_life", "enhanced_max_durability", // 72-75
+            "enhanced_life", "enhanced_mana", "attacker_takes_dmg", "gold_find", // 76-79
+            "magic_find", "knockback", "time_duration", "class_skills", // 80-83
+            "unsent_param", "add_experience", "life_per_kill", "reduce_vendor", // 84-87
+            "double_herb", "light_radius", "light_color", "reduced_requirements", // 88-91
+            "reduced_level_req", "ias", "reduced_level_req_pct", "last_block_frame", // 92-95
+            "frw", "non_class_skill", "state", "fhr", // 96-99
+            "monster_player_count", "poison_override_len", "fbr", "skill_bypass_undead", // 100-103
+            "skill_bypass_demons", "fcr", "skill_bypass_beasts", "single_skill", // 104-107
+            "slain_monsters_rip", "curse_resistance", "poison_length_reduction", "adds_damage", // 108-111
+            "hit_causes_flee", "hit_blinds", "damage_to_mana", "ignore_target_defense", // 112-115
+            "reduce_target_defense", "prevent_monster_heal", "half_freeze_duration", "to_hit_pct", // 116-119
+            "monster_def_deduct", "damage_to_demons", "damage_to_undead", "ar_vs_demons", "ar_vs_undead", // 120-124
+            "throwable", "elemental_skills", "all_skills", "attacker_takes_light_dmg", // 125-128
+            "iron_maiden_level", "life_tap_level", "thorns_pct", "bone_armor", "max_bone_armor", // 129-133
+            "freeze_target", "open_wounds", "crushing_blow", "kick_damage", // 134-137
+            "mana_per_kill", "life_per_demon_kill", "extra_blood", "deadly_strike", // 138-141
+            "fire_absorb_pct", "fire_absorb", "light_absorb_pct", "light_absorb", // 142-145
+            "magic_absorb_pct", "magic_absorb", "cold_absorb_pct", "cold_absorb", // 146-149
+            "slow", "aura", "indestructible", "cannot_be_frozen", // 150-153
+            "stamina_drain_pct", "reanimate", "piercing", "fires_magic_arrows", "fires_exploding_arrows", // 154-158
+            "min_throw_dmg", "max_throw_dmg", // 159-160
+        };
+        if (statId >= 0 && statId <= 160) return names[statId];
+        // High stat IDs (skill charges, etc)
+        if (statId == 188) return "skill_on_attack";
+        if (statId == 195) return "skill_on_kill";
+        if (statId == 196) return "skill_on_death";
+        if (statId == 197) return "skill_on_hit";
+        if (statId == 198) return "skill_on_levelup";
+        if (statId == 199) return "skill_on_get_hit";
+        if (statId == 201) return "skill_charges";
+        if (statId == 204) return "skill_tab";
+        if (statId == 214) return "sockets";
+        if (statId == 252) return "fire_mastery";
+        if (statId == 253) return "lightning_mastery";
+        if (statId == 254) return "cold_mastery";
+        if (statId == 255) return "poison_mastery";
+        if (statId == 329) return "item_armor_perlevel";
+        if (statId == 330) return "item_hp_perlevel";
+        return nullptr;
+    }
+
     // MCP protocol version
     static const char* MCP_VERSION = "2024-11-05";
 
@@ -801,6 +864,18 @@ namespace {
                     {"place_wait_ms", {{"type", "integer"}, {"description", "Wait after place (ms). Default: 200"}}}
                 }},
                 {"required", json::array({"item_id", "dest_x", "dest_y"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_item_stats"},
+            {"description", "Read all stats/affixes on an item by unit ID. Returns quality, level, sockets, ethereal, all stat values with names. Works for any item in inventory, stash, belt, or on cursor."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID"}}}
+                }},
+                {"required", json::array({"item_id"})}
             }}
         });
 
@@ -2432,6 +2507,140 @@ namespace {
 
             json info = {{"status", "placed"}, {"item_id", itemId}, {"x", x}, {"y", y}, {"container", container}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_item_stats") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            DWORD itemId = arguments.value("item_id", (DWORD)0);
+
+            // Find the item unit via hash table
+            UnitAny* pItem = D2CLIENT_FindServerSideUnit(itemId, 4); // type 4 = item
+            if (!pItem) {
+                pItem = D2CLIENT_FindClientSideUnit(itemId, 4);
+            }
+            if (!pItem) {
+                return {{"content", {{{"type", "text"}, {"text", "Item not found"}}}}, {"isError", true}};
+            }
+
+            json result;
+
+            // Basic item info
+            char itemName[64] = {};
+            SafeGetUnitName(pItem, itemName, sizeof(itemName));
+            result["name"] = itemName[0] ? itemName : "?";
+            result["unit_id"] = (int)pItem->dwUnitId;
+            result["code"] = (int)pItem->dwTxtFileNo;
+
+            // Item data (quality, level, flags, etc.)
+            if (pItem->pItemData) {
+                ItemData* id = pItem->pItemData;
+                static const char* qualityNames[] = {
+                    "none", "inferior", "normal", "superior",
+                    "magic", "set", "rare", "unique", "craft"
+                };
+                int q = id->dwQuality;
+                result["quality"] = (q >= 0 && q <= 8) ? qualityNames[q] : "unknown";
+                result["item_level"] = (int)id->dwItemLevel;
+                result["location"] = (int)id->ItemLocation;
+                result["body_location"] = (int)id->BodyLocation;
+
+                // Flags from dwFlags (ItemData+0x18)
+                DWORD flags = id->dwFlags;
+                result["ethereal"] = (flags & 0x00400000) != 0;
+                result["identified"] = (flags & 0x00000010) != 0;
+                result["socketed"] = (flags & 0x00000800) != 0;
+                result["runeword"] = (flags & 0x04000000) != 0;
+            }
+
+            // Item size
+            int w = 1, h = 1;
+            SafeGetItemSize(pItem->dwTxtFileNo, &w, &h);
+            result["size_x"] = w;
+            result["size_y"] = h;
+
+            // Read all stats via stat list (SEH in separate helper)
+            struct ItemStatData {
+                struct Entry { int id; int subIndex; int value; };
+                Entry entries[256];
+                int count;
+                int sockets;
+                int defense;
+                int minDmg;
+                int maxDmg;
+                bool error;
+            };
+
+            auto readStats = [](UnitAny* pUnit, ItemStatData& out) {
+                out.count = 0;
+                out.sockets = 0;
+                out.defense = 0;
+                out.minDmg = 0;
+                out.maxDmg = 0;
+                out.error = false;
+                __try {
+                    StatList* pSL = D2COMMON_GetStatList(pUnit, 0, 0x40);
+                    if (pSL) {
+                        Stat buf[256];
+                        memset(buf, 0, sizeof(buf));
+                        DWORD n = D2COMMON_CopyStatList(pSL, buf, 256);
+                        for (DWORD i = 0; i < n && i < 256; i++) {
+                            out.entries[out.count] = { buf[i].wStatIndex, buf[i].wSubIndex, (int)buf[i].dwStatValue };
+                            out.count++;
+                        }
+                    }
+                    out.sockets = D2COMMON_GetUnitStat(pUnit, 214, 0);
+                    out.defense = D2COMMON_GetUnitStat(pUnit, 31, 0);
+                    out.minDmg = D2COMMON_GetUnitStat(pUnit, 21, 0);
+                    out.maxDmg = D2COMMON_GetUnitStat(pUnit, 22, 0);
+                } __except(EXCEPTION_EXECUTE_HANDLER) {
+                    out.error = true;
+                }
+            };
+
+            ItemStatData sd;
+            readStats(pItem, sd);
+
+            json statsArray = json::array();
+            for (int i = 0; i < sd.count; i++) {
+                auto& e = sd.entries[i];
+                json stat;
+                stat["id"] = e.id;
+                stat["value"] = e.value;
+                if (e.subIndex != 0) stat["sub_index"] = e.subIndex;
+
+                const char* sname = GetStatName(e.id);
+                if (sname) {
+                    stat["name"] = sname;
+                } else {
+                    char buf[32]; snprintf(buf, sizeof(buf), "stat_%d", e.id);
+                    stat["name"] = buf;
+                }
+
+                if (e.id == 214) result["sockets"] = e.value;
+                if (e.id == 6 || e.id == 7 || e.id == 8 || e.id == 9 ||
+                    e.id == 10 || e.id == 11) {
+                    stat["display_value"] = e.value >> 8;
+                }
+                if (e.id == 57 || e.id == 58) stat["display_value"] = e.value / 256;
+                if (e.id == 59) stat["display_value_sec"] = e.value / 25.0;
+
+                statsArray.push_back(stat);
+            }
+
+            if (sd.sockets > 0) result["sockets"] = sd.sockets;
+            if (sd.defense > 0) result["defense"] = sd.defense;
+            if (sd.maxDmg > 0) {
+                result["min_damage"] = sd.minDmg;
+                result["max_damage"] = sd.maxDmg;
+            }
+            if (sd.error) result["_stat_error"] = "access violation reading stats";
+
+            result["stats"] = statsArray;
+            result["stat_count"] = (int)statsArray.size();
+
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
 
         if (name == "move_item") {
