@@ -5,10 +5,13 @@ to a configurable layout. Uses the move_item MCP tool for reliable
 atomic item movement with cursor verification.
 
 Usage:
-    python stash_organizer.py --scan          # Scan and show current layout
-    python stash_organizer.py --plan          # Show proposed reorganization
-    python stash_organizer.py --organize      # Execute reorganization
-    python stash_organizer.py --dry-run       # Show what would happen
+    python stash_organizer.py --scan              # Scan and show current layout
+    python stash_organizer.py --plan              # Show proposed reorganization
+    python stash_organizer.py --simulate          # Simulate moves, log efficiency
+    python stash_organizer.py --organize          # Execute reorganization
+    python stash_organizer.py --stash-inventory   # Move inventory items to stash
+    python stash_organizer.py --defrag            # Repack tabs to eliminate gaps
+    python stash_organizer.py --dry-run           # Show plan without moving
 
 Requires: game running with stash open, MCP server on port 21337.
 """
@@ -25,6 +28,124 @@ try:
 except ImportError:
     print("pip install requests")
     sys.exit(1)
+
+
+# ---- Action Log ----
+
+@dataclass
+class Action:
+    """A single recorded action."""
+    action: str          # "pick", "place", "tab_switch", "clear_cursor"
+    item_id: int = 0
+    item_name: str = ""
+    from_tab: int = -1
+    from_pos: Tuple[int, int] = (0, 0)
+    to_tab: int = -1
+    to_pos: Tuple[int, int] = (0, 0)
+    result: str = ""     # "ok", "swap", "fail", "skip", "wasted"
+    elapsed_ms: int = 0
+    note: str = ""
+
+class ActionLog:
+    """Tracks all actions for efficiency analysis."""
+    def __init__(self):
+        self.actions: List[Action] = []
+        self._start = time.time()
+
+    def log(self, **kwargs) -> Action:
+        a = Action(**kwargs)
+        self.actions.append(a)
+        return a
+
+    def summary(self) -> dict:
+        total = len(self.actions)
+        moves = [a for a in self.actions if a.action in ("pick", "place")]
+        tab_switches = [a for a in self.actions if a.action == "tab_switch"]
+        wasted = [a for a in self.actions if a.result == "wasted"]
+        swaps = [a for a in self.actions if a.result == "swap"]
+        failures = [a for a in self.actions if a.result == "fail"]
+        successful_moves = [a for a in self.actions if a.action == "move" and a.result == "ok"]
+        elapsed = time.time() - self._start
+        return {
+            "total_actions": total,
+            "successful_moves": len(successful_moves),
+            "tab_switches": len(tab_switches),
+            "swaps": len(swaps),
+            "wasted": len(wasted),
+            "failures": len(failures),
+            "elapsed_sec": round(elapsed, 1),
+            "moves_per_min": round(len(successful_moves) / max(elapsed / 60, 0.01), 1),
+        }
+
+    def print_summary(self):
+        s = self.summary()
+        print(f"\n=== ACTION LOG SUMMARY ===")
+        print(f"  Successful moves:  {s['successful_moves']}")
+        print(f"  Tab switches:      {s['tab_switches']}")
+        print(f"  Swaps handled:     {s['swaps']}")
+        print(f"  Wasted moves:      {s['wasted']}")
+        print(f"  Failures:          {s['failures']}")
+        print(f"  Total actions:     {s['total_actions']}")
+        print(f"  Elapsed:           {s['elapsed_sec']}s")
+        print(f"  Speed:             {s['moves_per_min']} moves/min")
+
+    def print_detail(self, last_n=0):
+        """Print detailed log. last_n=0 means all."""
+        actions = self.actions[-last_n:] if last_n else self.actions
+        for i, a in enumerate(actions):
+            parts = [f"{a.action:15s}"]
+            if a.item_name:
+                parts.append(f"{a.item_name[:25]:25s}")
+            if a.from_tab >= 0:
+                parts.append(f"tab{a.from_tab}({a.from_pos[0]},{a.from_pos[1]})")
+            if a.to_tab >= 0:
+                parts.append(f"-> tab{a.to_tab}({a.to_pos[0]},{a.to_pos[1]})")
+            parts.append(f"[{a.result}]")
+            if a.note:
+                parts.append(a.note)
+            print(f"  {' '.join(parts)}")
+
+    def save(self, path: str):
+        """Save log to JSON file."""
+        data = {
+            "summary": self.summary(),
+            "actions": [
+                {k: v for k, v in a.__dict__.items() if v}
+                for a in self.actions
+            ]
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"  Log saved to {path}")
+
+
+# ---- Protected Items ----
+
+# Inventory rows 2-3 are locked (user's equipped gear)
+LOCKED_INVENTORY_ROWS = {2, 3}
+
+# Items to never move (by name substring, case-insensitive)
+PROTECTED_ITEMS = [
+    "tome of town portal",
+    "tome of identify",
+    "horadric cube",
+]
+
+def is_protected(item: dict) -> bool:
+    """Check if an item should never be moved."""
+    name = item.get("name", "").lower()
+    # Remove color codes
+    while "\xc3\xbf" in name or "ÿc" in name:
+        idx = name.find("ÿc")
+        if idx >= 0:
+            name = name[:idx] + name[idx+3:]
+        else:
+            break
+    return any(p in name for p in PROTECTED_ITEMS)
+
+def is_in_locked_row(item: dict) -> bool:
+    """Check if an inventory item is in a locked row."""
+    return item.get("grid_y", 0) in LOCKED_INVENTORY_ROWS
 
 
 # ---- MCP Client ----
@@ -237,6 +358,7 @@ class StashOrganizer:
         self.layout = layout or DEFAULT_LAYOUT
         self.tabs = {}       # tab -> Container
         self.all_items = []  # flat list of all items across tabs
+        self.log = ActionLog()
 
     def scan_tab(self, tab: int) -> List[dict]:
         """Scan a single tab and return its items with sizes."""
@@ -478,11 +600,13 @@ class StashOrganizer:
                             return True
         return False
 
-    def _execute_single_move(self, m, dest_grids, idx, total) -> str:
+    def _execute_single_move(self, m, dest_grids, idx, total, simulate=False) -> str:
         """Execute a single move. Returns 'ok', 'skip', or 'fail'."""
         item = m["item"]
         uid = item["unit_id"]
+        name = m["name"][:30]
         from_tab, to_tab = m["from_tab"], m["to_tab"]
+        from_pos = (item.get("grid_x", 0), item.get("grid_y", 0))
         sx, sy = m["size_x"], m["size_y"]
 
         dest = dest_grids.get(to_tab)
@@ -492,24 +616,57 @@ class StashOrganizer:
 
         spot = dest.find_spot(sx, sy)
         if not spot:
-            print(f"  [{idx}/{total}] SKIP {m['name']}: no space in tab {to_tab}")
-            return "skip"
-
-        if not self._clear_cursor():
-            print(f"  [{idx}/{total}] SKIP {m['name']}: cursor stuck")
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, result="skip", note="no space")
+            if not simulate:
+                print(f"  [{idx}/{total}] SKIP {name}: no space in tab {to_tab}")
             return "skip"
 
         dest_x, dest_y = spot
-        print(f"  [{idx}/{total}] {m['name']} (tab {from_tab} -> tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
 
+        # Check if this would be a wasted move (same position)
+        if from_tab == to_tab and from_pos == (dest_x, dest_y):
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, to_pos=(dest_x, dest_y),
+                         result="wasted", note="already at target")
+            return "skip"
+
+        if simulate:
+            # Simulation: just update virtual grids, no real moves
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, to_pos=(dest_x, dest_y), result="ok")
+            if from_tab in dest_grids:
+                dest_grids[from_tab].unmark(item)
+            dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+            if from_tab != to_tab:
+                self.log.log(action="tab_switch", from_tab=from_tab, to_tab=to_tab, result="ok")
+            return "ok"
+
+        if not self._clear_cursor():
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         result="skip", note="cursor stuck")
+            print(f"  [{idx}/{total}] SKIP {name}: cursor stuck")
+            return "skip"
+
+        print(f"  [{idx}/{total}] {name} (tab {from_tab} -> tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
+
+        t0 = time.time()
         result = self.mcp.call("move_item", {
             "item_id": uid, "dest_container": "stash",
             "dest_x": dest_x, "dest_y": dest_y, "dest_tab": to_tab,
         }, timeout=20)
+        elapsed = int((time.time() - t0) * 1000)
 
         status = result.get("status", "unknown")
         if status == "moved":
             print("OK")
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, to_pos=(dest_x, dest_y),
+                         result="ok", elapsed_ms=elapsed)
             if from_tab in dest_grids:
                 dest_grids[from_tab].unmark(item)
             dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
@@ -517,6 +674,11 @@ class StashOrganizer:
         elif status == "swapped":
             swap = result.get("swapped_item", {})
             print(f"SWAP ({swap.get('name', '?')})")
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, to_pos=(dest_x, dest_y),
+                         result="swap", elapsed_ms=elapsed,
+                         note=f"displaced {swap.get('name', '?')}")
             if from_tab in dest_grids:
                 dest_grids[from_tab].unmark(item)
             dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
@@ -524,10 +686,14 @@ class StashOrganizer:
             return "ok"
         else:
             print(f"FAIL ({status})")
+            self.log.log(action="move", item_id=uid, item_name=name,
+                         from_tab=from_tab, from_pos=from_pos,
+                         to_tab=to_tab, to_pos=(dest_x, dest_y),
+                         result="fail", elapsed_ms=elapsed, note=status)
             self._clear_cursor()
             return "fail"
 
-    def execute_moves(self, moves, dry_run=False, max_moves=None):
+    def execute_moves(self, moves, dry_run=False, simulate=False, max_moves=None):
         """Two-pass execution: clear space first, then place items."""
         if dry_run:
             self.show_plan(moves)
@@ -539,18 +705,17 @@ class StashOrganizer:
             return
 
         self.show_plan(moves)
+        self.log = ActionLog()  # fresh log
 
-        # Split into two passes:
-        # Pass 1: Items leaving a tab that needs to RECEIVE items (frees space)
-        # Pass 2: Everything else
+        # Split into two passes
         receiving_tabs = set(m["to_tab"] for m in moves)
         pass1 = [m for m in moves if m["from_tab"] in receiving_tabs]
         pass2 = [m for m in moves if m["from_tab"] not in receiving_tabs]
-
         all_ordered = pass1 + pass2
         total = len(all_ordered)
 
-        print(f"\n=== EXECUTING {total} MOVES (pass1: {len(pass1)} clearing, pass2: {len(pass2)} placing) ===\n")
+        mode = "SIMULATING" if simulate else "EXECUTING"
+        print(f"\n=== {mode} {total} MOVES (pass1: {len(pass1)} clearing, pass2: {len(pass2)} placing) ===\n")
 
         dest_grids = {}
         for tab in self.tabs:
@@ -570,7 +735,7 @@ class StashOrganizer:
                 break
 
             move_count += 1
-            result = self._execute_single_move(m, dest_grids, i + 1, total)
+            result = self._execute_single_move(m, dest_grids, i + 1, total, simulate=simulate)
             if result == "ok":
                 success += 1
             elif result == "fail":
@@ -579,11 +744,116 @@ class StashOrganizer:
                 skipped += 1
 
         print(f"\n=== DONE: {success} moved, {failed} failed, {skipped} skipped ===")
+        self.log.print_summary()
 
-    def organize(self, dry_run=False, max_moves=None):
+    def organize(self, dry_run=False, simulate=False, max_moves=None, log_file=None):
         """Full reorganization pipeline."""
         moves = self.plan_reorganization()
-        self.execute_moves(moves, dry_run=dry_run, max_moves=max_moves)
+        self.execute_moves(moves, dry_run=dry_run, simulate=simulate, max_moves=max_moves)
+        if log_file:
+            self.log.save(log_file)
+
+    def stash_inventory(self, dry_run=False):
+        """Move non-protected inventory items into the correct stash tabs.
+
+        Respects:
+        - Locked inventory rows (2-3): never touched
+        - Protected items (cubes, tomes): never moved
+        - Layout config: items go to their category's tab
+        """
+        inv = self.mcp.call("get_inventory")
+        inv_items = [i for i in inv.get("items", []) if i.get("storage") == "inventory"]
+
+        # Get item sizes from grid
+        grid_data = self.mcp.call("get_stash_grid", {"container": "inventory"})
+        grid = grid_data.get("grid", [])
+        uid_cells = {}
+        for y, row in enumerate(grid):
+            for x, uid in enumerate(row):
+                if uid:
+                    uid_cells.setdefault(uid, set()).add((x, y))
+        for item in inv_items:
+            cells = uid_cells.get(item["unit_id"], set())
+            if cells:
+                xs = [c[0] for c in cells]
+                ys = [c[1] for c in cells]
+                item["size_x"] = max(xs) - min(xs) + 1
+                item["size_y"] = max(ys) - min(ys) + 1
+                item["grid_x"] = min(xs)
+                item["grid_y"] = min(ys)
+            else:
+                item["size_x"] = item["size_y"] = 1
+
+        # Filter: skip locked rows and protected items
+        moveable = []
+        for item in inv_items:
+            if is_in_locked_row(item):
+                continue
+            if is_protected(item):
+                continue
+            moveable.append(item)
+
+        if not moveable:
+            print("No inventory items to stash.")
+            return
+
+        print(f"\n=== STASH INVENTORY: {len(moveable)} items to move ===\n")
+        for item in moveable:
+            cat = categorize_item(item["name"])
+            target_tab = self._find_target_tab(cat)
+            name = item["name"][:30]
+            uid = item["unit_id"]
+            sx, sy = item.get("size_x", 1), item.get("size_y", 1)
+
+            if dry_run:
+                print(f"  [DRY] {name} -> tab {target_tab} ({cat})")
+                continue
+
+            # Switch to target tab and find spot
+            self.mcp.call("switch_stash_tab", {"tab": target_tab})
+            time.sleep(0.5)
+            stash_grid = self.mcp.call("get_stash_grid", {"container": "stash"})
+            sg = stash_grid.get("grid", [])
+
+            # Find spot that fits item size
+            spot = None
+            sh = len(sg)
+            sw = len(sg[0]) if sg else 0
+            for ty in range(sh - sy + 1):
+                for tx in range(sw - sx + 1):
+                    if all(sg[ty+dy][tx+dx] == 0 for dy in range(sy) for dx in range(sx)):
+                        spot = (tx, ty)
+                        break
+                if spot:
+                    break
+
+            if not spot:
+                print(f"  SKIP {name}: no space in tab {target_tab}")
+                continue
+
+            if not self._clear_cursor():
+                print(f"  SKIP {name}: cursor stuck")
+                continue
+
+            # Pick from inventory
+            self.mcp.call("item_to_cursor", {"item_id": uid})
+            time.sleep(0.3)
+
+            # Place in stash
+            self.mcp.call("cursor_to_container", {
+                "item_id": uid, "x": spot[0], "y": spot[1], "container": "stash"
+            })
+            time.sleep(0.3)
+
+            cursor = self.mcp.call("get_cursor_item")
+            if cursor.get("has_item"):
+                print(f"  SWAP {name} -> tab {target_tab} at {spot}")
+                self._clear_cursor()
+            else:
+                print(f"  OK   {name} -> tab {target_tab} at {spot}")
+
+        if dry_run:
+            print("\n[DRY RUN] No items moved.")
 
     def defrag_tab(self, tab: int, dry_run=False) -> int:
         """Defragment a single tab by repacking items top-left.
@@ -688,11 +958,15 @@ def main():
     parser = argparse.ArgumentParser(description="Stash Organizer")
     parser.add_argument("--scan", action="store_true", help="Scan all tabs and show layout")
     parser.add_argument("--plan", action="store_true", help="Show reorganization plan")
+    parser.add_argument("--simulate", action="store_true", help="Simulate moves (fast, no real moves, logs efficiency)")
     parser.add_argument("--organize", action="store_true", help="Execute reorganization")
+    parser.add_argument("--stash-inventory", action="store_true", help="Move inventory items to correct stash tabs")
     parser.add_argument("--defrag", action="store_true", help="Defrag tabs (repack items tightly)")
     parser.add_argument("--defrag-tab", type=int, help="Defrag a specific tab only")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without moving")
     parser.add_argument("--max-moves", type=int, help="Limit number of moves")
+    parser.add_argument("--log-file", type=str, help="Save action log to JSON file")
+    parser.add_argument("--log-detail", action="store_true", help="Print detailed action log")
     parser.add_argument("--url", default="http://127.0.0.1:21337")
     args = parser.parse_args()
 
@@ -702,7 +976,6 @@ def main():
         print("ERROR: MCP server not responding at", args.url)
         sys.exit(1)
 
-    # Check game state
     state = organizer.mcp.call("get_game_state")
     if state.get("state") != "in_game":
         print(f"ERROR: Not in game (state: {state.get('state', 'unknown')})")
@@ -720,15 +993,25 @@ def main():
         moves = organizer.plan_reorganization()
         organizer.show_plan(moves)
 
-    if is_defrag:
+    if args.stash_inventory:
+        organizer.stash_inventory(dry_run=args.dry_run)
+    elif is_defrag:
         tabs = [args.defrag_tab] if args.defrag_tab is not None else None
         organizer.defrag(tabs=tabs, dry_run=args.dry_run)
+    elif args.simulate:
+        organizer.organize(simulate=True, max_moves=args.max_moves,
+                          log_file=args.log_file or "organize_sim.json")
     elif args.organize:
-        organizer.organize(max_moves=args.max_moves)
+        organizer.organize(max_moves=args.max_moves, log_file=args.log_file)
     elif args.dry_run:
         organizer.organize(dry_run=True)
 
-    if not any([args.scan, args.plan, args.organize, args.dry_run, is_defrag]):
+    if args.log_detail and organizer.log.actions:
+        print("\n=== DETAILED ACTION LOG ===")
+        organizer.log.print_detail()
+
+    if not any([args.scan, args.plan, args.organize, args.dry_run,
+                is_defrag, args.simulate, args.stash_inventory]):
         organizer.show_current()
 
 
