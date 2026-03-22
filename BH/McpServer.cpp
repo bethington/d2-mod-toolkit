@@ -575,6 +575,69 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "use_item"},
+            {"description", "Use an item by unit ID (drink potion, read scroll, etc). Works for belt, inventory, stash, cube items."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID (from get_inventory or get_belt_contents)"}}}
+                }},
+                {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "drop_item"},
+            {"description", "Drop an item from cursor to the ground."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID to drop"}}}
+                }},
+                {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "pickup_item"},
+            {"description", "Pick up a ground item by unit ID."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Ground item unit ID"}}}
+                }},
+                {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "item_to_cursor"},
+            {"description", "Pick up an item to cursor from inventory/belt/body."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID to pick up to cursor"}}}
+                }},
+                {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "cursor_to_container"},
+            {"description", "Place cursor item into a container (inventory, stash, cube) at a specific position."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID on cursor"}}},
+                    {"x", {{"type", "integer"}, {"description", "Grid X position in container"}}},
+                    {"y", {{"type", "integer"}, {"description", "Grid Y position in container"}}},
+                    {"container", {{"type", "string"}, {"description", "'inventory' (default), 'stash', 'cube', 'trade'"}}}
+                }},
+                {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "resolve_function"},
             {"description", "Resolve a DLL function address by ordinal or name. Use for D2COMMON/D2CLIENT functions."},
             {"inputSchema", {
@@ -1728,6 +1791,101 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
+        }
+
+        if (name == "use_item") {
+            DWORD itemId = arguments.value("item_id", 0);
+            if (itemId == 0) return {{"content", {{{"type", "text"}, {"text", "item_id required"}}}}, {"isError", true}};
+
+            // Find the item to determine its location
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInventory) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            // Determine location by scanning inventory
+            int nodeP = -1;
+            UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
+            while (pItem) {
+                if (pItem->dwUnitId == itemId && pItem->pItemData) {
+                    nodeP = pItem->pItemData->NodePage;
+                    break;
+                }
+                pItem = D2COMMON_GetNextItemFromInventory(pItem);
+            }
+
+            BYTE packet[13] = {};
+            if (nodeP == NODEPAGE_BELTSLOTS) {
+                packet[0] = 0x26; // use belt item
+            } else {
+                packet[0] = 0x20; // use inventory/stash/cube item
+                if (pPlayer->pPath) {
+                    *(DWORD*)&packet[5] = pPlayer->pPath->xPos;
+                    *(DWORD*)&packet[9] = pPlayer->pPath->yPos;
+                }
+            }
+            *(DWORD*)&packet[1] = itemId;
+            D2NET_SendPacket(13, 1, packet);
+
+            json info = {{"status", "used"}, {"item_id", itemId}, {"location", nodeP}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "drop_item") {
+            DWORD itemId = arguments.value("item_id", 0);
+            BYTE packet[5] = {};
+            packet[0] = 0x17;
+            *(DWORD*)&packet[1] = itemId;
+            D2NET_SendPacket(5, 1, packet);
+
+            json info = {{"status", "dropped"}, {"item_id", itemId}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "pickup_item") {
+            DWORD itemId = arguments.value("item_id", 0);
+            BYTE packet[13] = {};
+            packet[0] = 0x16;
+            *(DWORD*)&packet[1] = 0x04; // UNIT_ITEM
+            *(DWORD*)&packet[5] = itemId;
+            D2NET_SendPacket(13, 0, packet);
+
+            json info = {{"status", "pickup_sent"}, {"item_id", itemId}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "item_to_cursor") {
+            DWORD itemId = arguments.value("item_id", 0);
+            BYTE packet[5] = {};
+            packet[0] = 0x19;
+            *(DWORD*)&packet[1] = itemId;
+            D2NET_SendPacket(5, 1, packet);
+
+            json info = {{"status", "to_cursor"}, {"item_id", itemId}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "cursor_to_container") {
+            DWORD itemId = arguments.value("item_id", 0);
+            int x = arguments.value("x", 0);
+            int y = arguments.value("y", 0);
+            std::string container = arguments.value("container", "inventory");
+
+            int dest = 0; // inventory
+            if (container == "stash") dest = 4;
+            else if (container == "cube") dest = 3;
+            else if (container == "trade") dest = 2;
+
+            BYTE packet[17] = {};
+            packet[0] = 0x18;
+            *(DWORD*)&packet[1] = itemId;
+            *(DWORD*)&packet[5] = x;
+            *(DWORD*)&packet[9] = y;
+            *(DWORD*)&packet[13] = dest;
+            D2NET_SendPacket(17, 1, packet);
+
+            json info = {{"status", "placed"}, {"item_id", itemId}, {"x", x}, {"y", y}, {"container", container}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "resolve_function") {
