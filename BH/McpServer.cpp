@@ -12,6 +12,7 @@
 #include "CrashCatcher.h"
 #include "PatchManager.h"
 #include "StructRegistry.h"
+#include "GameCallQueue.h"
 #include "GamePause.h"
 #include "MemWatch.h"
 #include "D2Ptrs.h"
@@ -105,6 +106,71 @@ namespace {
             }
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
         return false;
+    }
+
+    // Safe function call with SEH — matches exact argument count to avoid stack corruption
+    typedef DWORD (__stdcall *Std0)();
+    typedef DWORD (__stdcall *Std1)(DWORD);
+    typedef DWORD (__stdcall *Std2)(DWORD, DWORD);
+    typedef DWORD (__stdcall *Std3)(DWORD, DWORD, DWORD);
+    typedef DWORD (__stdcall *Std4)(DWORD, DWORD, DWORD, DWORD);
+    typedef DWORD (__stdcall *Std5)(DWORD, DWORD, DWORD, DWORD, DWORD);
+    typedef DWORD (__stdcall *Std6)(DWORD, DWORD, DWORD, DWORD, DWORD, DWORD);
+    typedef DWORD (__cdecl *Cdc0)();
+    typedef DWORD (__cdecl *Cdc1)(DWORD);
+    typedef DWORD (__cdecl *Cdc2)(DWORD, DWORD);
+    typedef DWORD (__cdecl *Cdc3)(DWORD, DWORD, DWORD);
+    typedef DWORD (__cdecl *Cdc4)(DWORD, DWORD, DWORD, DWORD);
+    typedef DWORD (__fastcall *Fst0)();
+    typedef DWORD (__fastcall *Fst1)(DWORD);
+    typedef DWORD (__fastcall *Fst2)(DWORD, DWORD);
+    typedef DWORD (__fastcall *Fst3)(DWORD, DWORD, DWORD);
+    typedef DWORD (__fastcall *Fst4)(DWORD, DWORD, DWORD, DWORD);
+
+    static bool SafeCallFunction(DWORD addr, DWORD* a, int argc, int conv, DWORD* pResult) {
+        __try {
+            DWORD ret = 0;
+            if (conv == 2) { // fastcall
+                switch (argc) {
+                    case 0: ret = ((Fst0)addr)(); break;
+                    case 1: ret = ((Fst1)addr)(a[0]); break;
+                    case 2: ret = ((Fst2)addr)(a[0], a[1]); break;
+                    case 3: ret = ((Fst3)addr)(a[0], a[1], a[2]); break;
+                    default: ret = ((Fst4)addr)(a[0], a[1], a[2], a[3]); break;
+                }
+            } else if (conv == 1) { // cdecl
+                switch (argc) {
+                    case 0: ret = ((Cdc0)addr)(); break;
+                    case 1: ret = ((Cdc1)addr)(a[0]); break;
+                    case 2: ret = ((Cdc2)addr)(a[0], a[1]); break;
+                    case 3: ret = ((Cdc3)addr)(a[0], a[1], a[2]); break;
+                    default: ret = ((Cdc4)addr)(a[0], a[1], a[2], a[3]); break;
+                }
+            } else { // stdcall
+                switch (argc) {
+                    case 0: ret = ((Std0)addr)(); break;
+                    case 1: ret = ((Std1)addr)(a[0]); break;
+                    case 2: ret = ((Std2)addr)(a[0], a[1]); break;
+                    case 3: ret = ((Std3)addr)(a[0], a[1], a[2]); break;
+                    case 4: ret = ((Std4)addr)(a[0], a[1], a[2], a[3]); break;
+                    case 5: ret = ((Std5)addr)(a[0], a[1], a[2], a[3], a[4]); break;
+                    default: ret = ((Std6)addr)(a[0], a[1], a[2], a[3], a[4], a[5]); break;
+                }
+            }
+            *pResult = ret;
+            return true;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    // Resolve a DLL ordinal to an address
+    static DWORD ResolveOrdinal(const char* dllName, int ordinal) {
+        HMODULE hMod = GetModuleHandleA(dllName);
+        if (!hMod) return 0;
+        if (ordinal < 0) ordinal = -ordinal;
+        FARPROC proc = GetProcAddress(hMod, (LPCSTR)(DWORD_PTR)ordinal);
+        return (DWORD)proc;
     }
 
     static bool SafeMemWrite(DWORD addr, const void* src, size_t size) {
@@ -506,6 +572,20 @@ namespace {
             {"name", "save_struct_defs"},
             {"description", "Save all struct definitions to structs.json in the game directory."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "resolve_function"},
+            {"description", "Resolve a DLL function address by ordinal or name. Use for D2COMMON/D2CLIENT functions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"dll", {{"type", "string"}, {"description", "DLL name (e.g., 'D2COMMON.dll', 'D2CLIENT.dll')"}}},
+                    {"ordinal", {{"type", "integer"}, {"description", "Ordinal number (positive). For D2 functions, use absolute value of negative ordinal."}}},
+                    {"name", {{"type", "string"}, {"description", "Function name (alternative to ordinal)"}}}
+                }},
+                {"required", json::array({"dll"})}
+            }}
         });
 
         tools.push_back({
@@ -1650,6 +1730,42 @@ namespace {
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
         }
 
+        if (name == "resolve_function") {
+            std::string dll = arguments.value("dll", "");
+            int ordinal = arguments.value("ordinal", 0);
+            std::string funcName = arguments.value("name", "");
+
+            HMODULE hMod = GetModuleHandleA(dll.c_str());
+            if (!hMod) {
+                return {{"content", {{{"type", "text"}, {"text", "DLL not loaded: " + dll}}}}, {"isError", true}};
+            }
+
+            DWORD addr = 0;
+            if (ordinal > 0) {
+                addr = (DWORD)GetProcAddress(hMod, (LPCSTR)(DWORD_PTR)ordinal);
+            } else if (!funcName.empty()) {
+                addr = (DWORD)GetProcAddress(hMod, funcName.c_str());
+            }
+
+            if (addr == 0) {
+                return {{"content", {{{"type", "text"}, {"text", "Function not found"}}}}, {"isError", true}};
+            }
+
+            char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", addr);
+            char baseBuf[16]; snprintf(baseBuf, sizeof(baseBuf), "0x%08X", (DWORD)hMod);
+
+            json info = {
+                {"dll", dll},
+                {"base", baseBuf},
+                {"address", addrBuf},
+                {"offset", addr - (DWORD)hMod}
+            };
+            if (ordinal > 0) info["ordinal"] = ordinal;
+            if (!funcName.empty()) info["name"] = funcName;
+
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
         if (name == "call_function") {
             std::string addrStr = arguments.value("address", "");
             std::string convention = arguments.value("convention", "stdcall");
@@ -1674,70 +1790,36 @@ namespace {
                 }
             }
 
-            // Call the function with SEH protection
-            DWORD result = 0;
-            bool success = false;
+            // Execute on game thread for safety (game functions expect game thread context)
+            GameCallQueue::PendingCall call = {};
+            call.address = funcAddr;
+            for (int i = 0; i < argCount && i < 8; i++) call.args[i] = args[i];
+            call.argCount = argCount;
+            call.convention = 0;
+            if (convention == "cdecl") call.convention = 1;
+            else if (convention == "fastcall") call.convention = 2;
 
-            // Use SafeCallFunction helper (defined with __try)
-            struct CallParams {
-                DWORD addr; DWORD args[8]; int argc; std::string conv;
-                DWORD retval; bool ok;
-            };
-            // Can't use __try with C++ objects, so use a static helper
-            static auto DoCall = [](DWORD addr, DWORD* pArgs, int argc, const char* conv) -> DWORD {
-                typedef DWORD (__stdcall *StdcallFunc0)();
-                typedef DWORD (__stdcall *StdcallFunc1)(DWORD);
-                typedef DWORD (__stdcall *StdcallFunc2)(DWORD, DWORD);
-                typedef DWORD (__stdcall *StdcallFunc3)(DWORD, DWORD, DWORD);
-                typedef DWORD (__stdcall *StdcallFunc4)(DWORD, DWORD, DWORD, DWORD);
-                typedef DWORD (__cdecl *CdeclFunc0)();
-                typedef DWORD (__cdecl *CdeclFunc1)(DWORD);
-                typedef DWORD (__cdecl *CdeclFunc2)(DWORD, DWORD);
-                typedef DWORD (__cdecl *CdeclFunc3)(DWORD, DWORD, DWORD);
-                typedef DWORD (__fastcall *FastFunc0)();
-                typedef DWORD (__fastcall *FastFunc1)(DWORD);
-                typedef DWORD (__fastcall *FastFunc2)(DWORD, DWORD);
-                typedef DWORD (__fastcall *FastFunc3)(DWORD, DWORD, DWORD);
-
-                if (strcmp(conv, "fastcall") == 0) {
-                    switch (argc) {
-                        case 0: return ((FastFunc0)addr)();
-                        case 1: return ((FastFunc1)addr)(pArgs[0]);
-                        case 2: return ((FastFunc2)addr)(pArgs[0], pArgs[1]);
-                        case 3: return ((FastFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
-                        default: return ((FastFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
-                    }
-                } else if (strcmp(conv, "cdecl") == 0) {
-                    switch (argc) {
-                        case 0: return ((CdeclFunc0)addr)();
-                        case 1: return ((CdeclFunc1)addr)(pArgs[0]);
-                        case 2: return ((CdeclFunc2)addr)(pArgs[0], pArgs[1]);
-                        case 3: return ((CdeclFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
-                        default: return ((CdeclFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
-                    }
-                } else { // stdcall
-                    switch (argc) {
-                        case 0: return ((StdcallFunc0)addr)();
-                        case 1: return ((StdcallFunc1)addr)(pArgs[0]);
-                        case 2: return ((StdcallFunc2)addr)(pArgs[0], pArgs[1]);
-                        case 3: return ((StdcallFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
-                        case 4: return ((StdcallFunc4)addr)(pArgs[0], pArgs[1], pArgs[2], pArgs[3]);
-                        default: return ((StdcallFunc4)addr)(pArgs[0], pArgs[1], pArgs[2], pArgs[3]);
-                    }
-                }
-            };
-
-            // Wrap in SEH via our SafeMemRead pattern — but we can't use __try here
-            // Use _set_se_translator that we set on this thread
-            try {
-                result = DoCall(funcAddr, args, argCount, convention.c_str());
-                success = true;
-            } catch (...) {
-                success = false;
-            }
+            bool success = GameCallQueue::CallOnGameThread(call, 5000);
+            DWORD result = call.result;
 
             if (!success) {
-                return {{"content", {{{"type", "text"}, {"text", "Function call crashed at " + addrStr}}}}, {"isError", true}};
+                std::string errMsg;
+                if (call.crashed) {
+                    errMsg = "Function call crashed at " + addrStr;
+                    auto crashes = CrashCatcher::GetCrashLog();
+                    if (!crashes.empty()) {
+                        auto& last = crashes.back();
+                        char detail[256];
+                        snprintf(detail, sizeof(detail),
+                            ". %s at 0x%08X (%s+0x%X)",
+                            CrashCatcher::GetExceptionName(last.exceptionCode),
+                            last.exceptionAddress, last.moduleName, last.moduleOffset);
+                        errMsg += detail;
+                    }
+                } else {
+                    errMsg = "Function call timed out (game not running or paused?)";
+                }
+                return {{"content", {{{"type", "text"}, {"text", errMsg}}}}, {"isError", true}};
             }
 
             char retBuf[16]; snprintf(retBuf, sizeof(retBuf), "0x%08X", result);

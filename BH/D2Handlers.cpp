@@ -7,6 +7,7 @@
 #include "GameNav.h"
 #include "GamePause.h"
 #include "MemWatch.h"
+#include "GameCallQueue.h"
 #include "McpServer.h"
 
 #include <iterator>
@@ -34,6 +35,7 @@ void GameLoop() {
 	AutoPotion::Update();
 	AutoPickup::Update();
 	MemWatch::Update();
+	GameCallQueue::ProcessPending();
 	GameNav::CheckPendingExit();
 }
 
