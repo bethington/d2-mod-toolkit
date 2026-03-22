@@ -162,7 +162,17 @@ class StructExplorer:
         return explored
 
     def discover(self, address: str, size: int = 256) -> Dict:
-        """Analyze unknown memory region and propose struct layout."""
+        """Analyze unknown memory region and propose struct layout.
+
+        Classifies each field with heuristics:
+        - Pointer: valid readable address, try to match known struct signatures
+        - String: sequences of printable ASCII chars
+        - Float: value in reasonable float range
+        - Small int: < 0x10000 (likely enum, counter, index)
+        - Flags: power of 2 patterns
+        - Zero: null/unused
+        - Large int: everything else
+        """
         result = self.game.call("read_region", {
             "address": address,
             "size": size
@@ -171,53 +181,199 @@ class StructExplorer:
         if "error" in result:
             return {"error": result["error"]}
 
+        # Also read raw bytes for string detection
+        raw = self.game.call("read_memory", {
+            "address": address,
+            "size": size,
+            "format": "all"
+        })
+        ascii_str = raw.get("ascii", "")
+
         proposed_fields = []
+        known_structs = self.game.call("list_struct_defs").get("structs", [])
+
         for dw in result.get("dwords", []):
-            field_info = {
-                "offset": dw["offset"],
-                "address": dw["address"],
-                "value": dw["value"],
-                "hex": dw["hex"],
-                "classification": dw["type"]
-            }
+            offset = dw["offset"]
+            val = dw["value"]
+            hex_val = dw["hex"]
+            classification = dw["type"]
+            field_name = f"field_{offset:02X}"
+            confidence = "unknown"
+            pointed_struct = ""
+            extra = {}
 
-            # Enhance classification
-            if dw["type"] == "pointer":
-                # Try to identify what this pointer points to
-                ptr_region = self.game.call("read_region", {
-                    "address": dw["hex"],
-                    "size": 16
+            if val == 0:
+                classification = "zero"
+                field_name = f"_pad_{offset:02X}"
+                confidence = "likely"
+
+            elif classification == "pointer":
+                confidence = "likely"
+                field_name = f"ptr_{offset:02X}"
+
+                # Try to identify what it points to by reading first DWORD
+                # and matching against known struct signatures
+                peek = self.game.call("read_region", {
+                    "address": hex_val,
+                    "size": 32
                 })
-                if "error" not in ptr_region:
-                    # Check if it looks like a known struct
-                    field_info["pointer_preview"] = [
-                        d["hex"] for d in ptr_region.get("dwords", [])[:4]
-                    ]
+                if "error" not in peek:
+                    preview = [d["hex"] for d in peek.get("dwords", [])[:4]]
+                    extra["pointer_preview"] = preview
 
-            proposed_fields.append(field_info)
+                    # Heuristic: try reading as each known struct and score
+                    first_dword = peek.get("dwords", [{}])[0].get("value", 0)
+
+                    # UnitAny signature: dwType 0-5 at offset 0
+                    if first_dword <= 5:
+                        pointed_struct = "UnitAny?"
+                        confidence = "possible"
+
+                    # Inventory signature: dwSignature == 0x01020304
+                    if first_dword == 0x01020304:
+                        pointed_struct = "Inventory"
+                        confidence = "high"
+
+            elif classification == "small_int":
+                confidence = "likely"
+                if val <= 5:
+                    field_name = f"type_{offset:02X}"
+                    extra["possible_enum"] = True
+                elif val <= 100:
+                    field_name = f"count_{offset:02X}"
+                elif val <= 0xFFFF:
+                    field_name = f"index_{offset:02X}"
+
+            elif classification == "possible_string":
+                # Check for actual string in raw bytes
+                str_start = offset
+                str_chars = ""
+                for i in range(str_start, min(str_start + 32, len(ascii_str))):
+                    if i < len(ascii_str) and ascii_str[i] != '.':
+                        str_chars += ascii_str[i]
+                    else:
+                        break
+                if len(str_chars) >= 3:
+                    classification = "string"
+                    field_name = f"sz_{offset:02X}"
+                    extra["string_value"] = str_chars
+                    confidence = "high"
+
+            else:
+                # Check if it looks like a float
+                import struct as pystruct
+                try:
+                    float_val = pystruct.unpack('f', pystruct.pack('I', val & 0xFFFFFFFF))[0]
+                    if 0.001 < abs(float_val) < 1e6 and not (val > 0x3F000000 and val < 0x47000000 and float_val == int(float_val)):
+                        classification = "possible_float"
+                        extra["float_value"] = round(float_val, 4)
+                except:
+                    pass
+
+                # Check for flag patterns (powers of 2)
+                if val != 0 and (val & (val - 1)) == 0:
+                    extra["possible_flag"] = True
+
+            proposed_fields.append({
+                "offset": offset,
+                "address": dw["address"],
+                "value": val,
+                "hex": hex_val,
+                "classification": classification,
+                "suggested_name": field_name,
+                "confidence": confidence,
+                "pointed_struct": pointed_struct,
+                **extra
+            })
+
+        # Detect consecutive zero regions (padding)
+        zero_runs = []
+        run_start = None
+        for f in proposed_fields:
+            if f["classification"] == "zero":
+                if run_start is None:
+                    run_start = f["offset"]
+            else:
+                if run_start is not None:
+                    run_end = f["offset"]
+                    if run_end - run_start >= 8:
+                        zero_runs.append({"start": run_start, "end": run_end, "size": run_end - run_start})
+                    run_start = None
 
         return {
             "address": address,
             "size": size,
+            "field_count": len(proposed_fields),
+            "pointer_count": sum(1 for f in proposed_fields if f["classification"] == "pointer"),
+            "string_count": sum(1 for f in proposed_fields if f["classification"] == "string"),
+            "zero_count": sum(1 for f in proposed_fields if f["classification"] == "zero"),
+            "padding_regions": zero_runs,
             "fields": proposed_fields,
             "timestamp": datetime.now().isoformat()
         }
 
     def compare(self, struct_name: str, address: str = None) -> Dict:
-        """Compare Ghidra struct definition with runtime values."""
+        """Compare our struct definition with Ghidra's and validate against live memory."""
         # Get our struct def
         our_def = self.game.call("get_struct_def", {"name": struct_name})
         if "error" in our_def:
-            return {"error": f"Struct not found: {struct_name}"}
+            return {"error": f"Struct not found in registry: {struct_name}"}
 
-        # TODO: Query Ghidra for its version of this struct
-        # For now, just report what we have
-        return {
+        result = {
             "struct": struct_name,
-            "our_definition": our_def,
-            "ghidra_definition": "TODO: query Ghidra MCP",
-            "differences": []
+            "our_size": our_def.get("size", 0),
+            "our_field_count": len(our_def.get("fields", [])),
+            "our_source": our_def.get("source", ""),
+            "differences": [],
+            "validations": []
         }
+
+        # If we have an address, validate fields against live memory
+        if address:
+            live = self.game.call("read_struct", {
+                "address": address,
+                "struct_name": struct_name,
+                "follow_pointers": False
+            })
+            if "error" not in live:
+                for f in live.get("fields", []):
+                    validation = {
+                        "name": f["name"],
+                        "offset": f["offset"],
+                        "value": f.get("value"),
+                        "valid": True
+                    }
+
+                    # Check pointer fields are actually valid pointers
+                    if f.get("points_to") and f.get("value") and f["value"] != "0x00000000":
+                        ptr_hex = f["value"]
+                        peek = self.game.call("read_memory", {
+                            "address": ptr_hex,
+                            "size": 4,
+                            "format": "hex"
+                        })
+                        if "error" in peek or "Cannot read" in str(peek):
+                            validation["valid"] = False
+                            validation["issue"] = f"Pointer {ptr_hex} is not readable"
+                            result["differences"].append(validation)
+
+                    result["validations"].append(validation)
+
+        # Try to query Ghidra for its version
+        try:
+            ghidra = McpClient(self.ghidra_url)
+            if ghidra.is_alive():
+                # Search for struct in Ghidra
+                ghidra_result = ghidra.call("search_data_types", {"pattern": struct_name})
+                if "error" not in ghidra_result:
+                    result["ghidra_types_found"] = ghidra_result
+                result["ghidra_available"] = True
+            else:
+                result["ghidra_available"] = False
+        except:
+            result["ghidra_available"] = False
+
+        return result
 
 
 # ---- Output Formatters ----
@@ -361,6 +517,13 @@ def main():
     p_export.add_argument("--output", default="structs/")
     p_export.add_argument("--format", choices=["json", "c", "both"], default="both")
 
+    # propose
+    p_propose = sub.add_parser("propose", help="Discover and propose a struct definition")
+    p_propose.add_argument("--address", required=True)
+    p_propose.add_argument("--size", type=int, default=128)
+    p_propose.add_argument("--name", default="Unknown")
+    p_propose.add_argument("--save", action="store_true", help="Save to struct registry")
+
     # list
     sub.add_parser("list", help="List known struct definitions")
 
@@ -386,6 +549,76 @@ def main():
     elif args.command == "compare":
         result = explorer.compare(args.type, args.address)
         print(json.dumps(result, indent=2, default=str))
+
+    elif args.command == "propose":
+        result = explorer.discover(args.address, args.size)
+        if "error" in result:
+            print(f"Error: {result['error']}")
+            sys.exit(1)
+
+        print(f"\n=== Proposed struct: {args.name} ({args.size} bytes) ===")
+        print(f"Pointers: {result['pointer_count']}  Strings: {result['string_count']}  Zeros: {result['zero_count']}")
+        if result.get("padding_regions"):
+            print(f"Padding regions: {result['padding_regions']}")
+        print()
+
+        type_map = {
+            "pointer": "pointer", "string": "string", "zero": "padding",
+            "small_int": "dword", "integer": "dword", "possible_float": "float",
+            "possible_string": "dword", "unknown": "dword"
+        }
+
+        # Print proposed fields
+        for f in result["fields"]:
+            cls = f["classification"]
+            name = f["suggested_name"]
+            val = f["hex"]
+            conf = f["confidence"]
+            pts = f.get("pointed_struct", "")
+            extra = ""
+            if f.get("string_value"):
+                extra = f' = "{f["string_value"]}"'
+            if f.get("float_value"):
+                extra = f" = {f['float_value']}"
+            if pts:
+                extra += f" -> {pts}"
+
+            color = {"high": "", "likely": "", "possible": "?", "unknown": "??"}
+            marker = color.get(conf, "")
+            print(f"  +0x{f['offset']:02X}  {name:20s}  {cls:14s}  {val}  {marker}{extra}")
+
+        # If --save, create a struct definition in the registry
+        if args.save:
+            print(f"\nSaving as '{args.name}' to struct registry...")
+            # Build fields for the registry
+            # Note: we can't call add_struct_def via MCP yet (tool doesn't exist)
+            # For now, save to a JSON file
+            struct_def = {
+                args.name: {
+                    "size": args.size,
+                    "source": "discovered",
+                    "fields": []
+                }
+            }
+            for f in result["fields"]:
+                cls = f["classification"]
+                ft = type_map.get(cls, "dword")
+                fd = {
+                    "name": f["suggested_name"],
+                    "offset": f["offset"],
+                    "type": ft,
+                    "size": 4
+                }
+                if f.get("pointed_struct"):
+                    fd["points_to"] = f["pointed_struct"].rstrip("?")
+                if f.get("string_value"):
+                    fd["comment"] = f["string_value"]
+                struct_def[args.name]["fields"].append(fd)
+
+            outpath = f"discovered_{args.name}.json"
+            with open(outpath, "w") as fout:
+                json.dump(struct_def, fout, indent=2)
+            print(f"Saved to {outpath}")
 
     elif args.command == "export":
         os.makedirs(args.output, exist_ok=True)
