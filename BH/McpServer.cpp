@@ -623,6 +623,19 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "click_screen"},
+            {"description", "Simulate a mouse click at screen coordinates on the game window. Useful for clicking UI buttons that aren't standard D2WIN controls (like PD2 stash tabs)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"x", {{"type", "integer"}, {"description", "Screen X coordinate"}}},
+                    {"y", {{"type", "integer"}, {"description", "Screen Y coordinate"}}}
+                }},
+                {"required", json::array({"x", "y"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "get_stash_grid"},
             {"description", "Get the stash occupancy grid showing which cells are free. Each cell shows the unit_id of the item occupying it, or 0 for empty."},
             {"inputSchema", {
@@ -1893,6 +1906,24 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
+        }
+
+        if (name == "click_screen") {
+            int x = arguments.value("x", 0);
+            int y = arguments.value("y", 0);
+
+            HWND hWnd = FindWindow(nullptr, "Diablo II");
+            if (!hWnd) {
+                return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
+            }
+
+            LPARAM lParam = MAKELPARAM(x, y);
+            PostMessage(hWnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+            Sleep(50);
+            PostMessage(hWnd, WM_LBUTTONUP, 0, lParam);
+
+            json info = {{"status", "clicked"}, {"x", x}, {"y", y}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "get_cursor_item") {
