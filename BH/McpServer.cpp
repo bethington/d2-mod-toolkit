@@ -868,6 +868,12 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "get_skills"},
+            {"description", "Get all skill allocations for the player. Returns skill IDs, names, base levels, and total levels. Useful for detecting build type (e.g., Lightning Sorc, Hammerdin)."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+
+        tools.push_back({
             {"name", "get_item_stats"},
             {"description", "Read all stats/affixes on an item by unit ID. Returns quality, level, sockets, ethereal, all stat values with names. Works for any item in inventory, stash, belt, or on cursor."},
             {"inputSchema", {
@@ -2523,6 +2529,124 @@ namespace {
 
             json info = {{"status", "placed"}, {"item_id", itemId}, {"x", x}, {"y", y}, {"container", container}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_skills") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInfo) {
+                return {{"content", {{{"type", "text"}, {"text", "No player/skill info"}}}}, {"isError", true}};
+            }
+
+            json result;
+            result["class_id"] = (int)pPlayer->dwTxtFileNo;
+            static const char* classNames[] = {"Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"};
+            int classId = pPlayer->dwTxtFileNo;
+            result["class"] = (classId >= 0 && classId <= 6) ? classNames[classId] : "Unknown";
+
+            // Read skills via SEH-safe helper
+            struct SkillEntry { int skillId; int baseLevel; int totalLevel; char tree[32]; };
+            struct SkillReadResult {
+                SkillEntry entries[120];
+                int count;
+                bool error;
+            };
+
+            auto readSkills = [](UnitAny* pUnit, int cls, SkillReadResult& out) {
+                out.count = 0;
+                out.error = false;
+                __try {
+                    Skill* pSkill = pUnit->pInfo->pFirstSkill;
+                    while (pSkill && out.count < 120) {
+                        if (pSkill->pSkillInfo && pSkill->skillLevel > 0) {
+                            auto& e = out.entries[out.count];
+                            DWORD sid = pSkill->pSkillInfo->wSkillId;
+                            e.skillId = (int)sid;
+                            e.baseLevel = pSkill->skillLevel;
+                            e.totalLevel = D2COMMON_GetSkillLevel(pUnit, pSkill, TRUE);
+
+                            const char* tree = "Unknown";
+                            if (cls == 0) {
+                                if (sid <= 11) tree = "Bow and Crossbow";
+                                else if (sid <= 21) tree = "Passive and Magic";
+                                else if (sid <= 31) tree = "Javelin and Spear";
+                            } else if (cls == 1) {
+                                if (sid >= 36 && sid <= 46) tree = "Fire";
+                                else if (sid >= 47 && sid <= 57) tree = "Lightning";
+                                else if (sid >= 58 && sid <= 65) tree = "Cold";
+                            } else if (cls == 2) {
+                                if (sid >= 66 && sid <= 76) tree = "Curses";
+                                else if (sid >= 77 && sid <= 86) tree = "Poison and Bone";
+                                else if (sid >= 87 && sid <= 95) tree = "Summoning";
+                            } else if (cls == 3) {
+                                if (sid >= 96 && sid <= 106) tree = "Combat";
+                                else if (sid >= 107 && sid <= 116) tree = "Offensive Auras";
+                                else if (sid >= 117 && sid <= 125) tree = "Defensive Auras";
+                            } else if (cls == 4) {
+                                if (sid >= 126 && sid <= 135) tree = "Warcries";
+                                else if (sid >= 136 && sid <= 145) tree = "Combat Masteries";
+                                else if (sid >= 146 && sid <= 155) tree = "Combat";
+                            } else if (cls == 5) {
+                                if (sid >= 221 && sid <= 230) tree = "Summoning";
+                                else if (sid >= 231 && sid <= 240) tree = "Shape Shifting";
+                                else if (sid >= 241 && sid <= 250) tree = "Elemental";
+                            } else if (cls == 6) {
+                                if (sid >= 251 && sid <= 260) tree = "Traps";
+                                else if (sid >= 261 && sid <= 270) tree = "Shadow Disciplines";
+                                else if (sid >= 271 && sid <= 280) tree = "Martial Arts";
+                            }
+                            strncpy_s(e.tree, tree, sizeof(e.tree));
+                            out.count++;
+                        }
+                        pSkill = pSkill->pNextSkill;
+                    }
+                } __except(EXCEPTION_EXECUTE_HANDLER) {
+                    out.error = true;
+                }
+            };
+
+            SkillReadResult sr;
+            readSkills(pPlayer, classId, sr);
+
+            json skillList = json::array();
+            std::map<std::string, int> treeTotals;
+            int totalPoints = 0;
+
+            for (int i = 0; i < sr.count; i++) {
+                auto& e = sr.entries[i];
+                json sk;
+                sk["skill_id"] = e.skillId;
+                sk["base_level"] = e.baseLevel;
+                sk["total_level"] = e.totalLevel;
+                sk["tree"] = e.tree;
+                skillList.push_back(sk);
+                totalPoints += e.baseLevel;
+                treeTotals[e.tree] += e.baseLevel;
+            }
+
+            json treeSummary = json::object();
+            std::string primaryTree = "Unknown";
+            int maxPoints = 0;
+            for (auto it = treeTotals.begin(); it != treeTotals.end(); ++it) {
+                treeSummary[it->first] = it->second;
+                if (it->second > maxPoints) {
+                    maxPoints = it->second;
+                    primaryTree = it->first;
+                }
+            }
+
+            if (sr.error) result["_error"] = "access violation reading skills";
+
+            result["skills"] = skillList;
+            result["skill_count"] = (int)skillList.size();
+            result["total_points"] = totalPoints;
+            result["tree_summary"] = treeSummary;
+            result["primary_tree"] = primaryTree;
+            result["build_name"] = std::string(result["class"].get<std::string>()) + " (" + primaryTree + ")";
+
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
 
         if (name == "get_item_stats") {
