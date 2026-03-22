@@ -608,6 +608,24 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "get_stash_grid"},
+            {"description", "Get the stash occupancy grid showing which cells are free. Each cell shows the unit_id of the item occupying it, or 0 for empty."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"container", {{"type", "string"}, {"description", "'inventory' (10x4), 'stash' (10x16), or 'cube' (3x4). Default 'inventory'."}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_cursor_item"},
+            {"description", "Check if an item is currently on the cursor."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
             {"name", "get_nearby_objects"},
             {"description", "List nearby game objects (stash, waypoint, shrines, chests, portals) with unit IDs and positions."},
             {"inputSchema", {
@@ -1860,6 +1878,97 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
+        }
+
+        if (name == "get_cursor_item") {
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInventory) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            UnitAny* pCursor = pPlayer->pInventory->pCursorItem;
+            if (!pCursor) {
+                json info = {{"has_item", false}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+            char itemName[64] = {};
+            SafeGetUnitName(pCursor, itemName, sizeof(itemName));
+            json info = {
+                {"has_item", true},
+                {"unit_id", (int)pCursor->dwUnitId},
+                {"code", (int)pCursor->dwTxtFileNo},
+                {"name", itemName[0] ? itemName : "?"}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_stash_grid") {
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInventory) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            std::string container = arguments.value("container", "inventory");
+            int targetLoc = 0; // STORAGE_INVENTORY
+            int gridW = 10, gridH = 4;
+            if (container == "stash") { targetLoc = 4; gridW = 10; gridH = 16; }
+            else if (container == "cube") { targetLoc = 3; gridW = 3; gridH = 4; }
+
+            // Build occupancy grid
+            std::vector<int> grid(gridW * gridH, 0);
+
+            UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
+            while (pItem) {
+                if (pItem->pItemData && pItem->pItemData->ItemLocation == targetLoc) {
+                    int x = 0, y = 0;
+                    if (pItem->pPath) {
+                        ItemPath* ip = (ItemPath*)pItem->pPath;
+                        x = (int)ip->dwPosX;
+                        y = (int)ip->dwPosY;
+                    }
+
+                    // Get item size
+                    int w = 1, h = 1;
+                    ItemsTxt* txt = D2COMMON_GetItemText(pItem->dwTxtFileNo);
+                    if (txt) {
+                        w = txt->binvwidth;
+                        h = txt->binvheight;
+                        if (w < 1) w = 1;
+                        if (h < 1) h = 1;
+                    }
+
+                    // Mark occupied cells
+                    for (int iy = y; iy < y + h && iy < gridH; iy++) {
+                        for (int ix = x; ix < x + w && ix < gridW; ix++) {
+                            grid[iy * gridW + ix] = pItem->dwUnitId;
+                        }
+                    }
+                }
+
+                pItem = D2COMMON_GetNextItemFromInventory(pItem);
+            }
+
+            // Build response
+            json rows = json::array();
+            int freeCount = 0;
+            for (int y = 0; y < gridH; y++) {
+                json row = json::array();
+                for (int x = 0; x < gridW; x++) {
+                    int uid = grid[y * gridW + x];
+                    row.push_back(uid);
+                    if (uid == 0) freeCount++;
+                }
+                rows.push_back(row);
+            }
+
+            json info = {
+                {"container", container},
+                {"width", gridW},
+                {"height", gridH},
+                {"total_cells", gridW * gridH},
+                {"free_cells", freeCount},
+                {"grid", rows}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "get_nearby_objects") {
