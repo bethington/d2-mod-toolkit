@@ -157,6 +157,7 @@
     <ClCompile Include="AutoPickup.cpp" />
     <ClCompile Include="CrashCatcher.cpp" />
     <ClCompile Include="PatchManager.cpp" />
+    <ClCompile Include="StructRegistry.cpp" />
     <ClCompile Include="GameNav.cpp" />
     <ClCompile Include="GamePause.cpp" />
     <ClCompile Include="MemWatch.cpp" />
@@ -217,6 +218,7 @@
     <ClInclude Include="AutoPickup.h" />
     <ClInclude Include="CrashCatcher.h" />
     <ClInclude Include="PatchManager.h" />
+    <ClInclude Include="StructRegistry.h" />
     <ClInclude Include="GameNav.h" />
     <ClInclude Include="GamePause.h" />
     <ClInclude Include="MemWatch.h" />

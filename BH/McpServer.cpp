@@ -11,6 +11,7 @@
 #include "GameNav.h"
 #include "CrashCatcher.h"
 #include "PatchManager.h"
+#include "StructRegistry.h"
 #include "GamePause.h"
 #include "MemWatch.h"
 #include "D2Ptrs.h"
@@ -300,7 +301,7 @@ namespace {
                     {"capture", {{"type", "string"}, {"description", "Capture level: 'light', 'medium', 'full' (default 'light')"}}},
                     {"arg_count", {{"type", "integer"}, {"description", "Number of stack arguments to capture (for medium/full, default 0)"}}}
                 }},
-                {"required", {"address"}}
+                {"required", json::array({"address"})}
             }}
         });
 
@@ -383,7 +384,7 @@ namespace {
                     {"address", {{"type", "string"}, {"description", "Hex address (e.g., '0x6FAB1234')"}}},
                     {"bytes", {{"type", "string"}, {"description", "Hex bytes to write (e.g., '90 90 90')"}}}
                 }},
-                {"required", {"name", "address", "bytes"}}
+                {"required", json::array({"name", "address", "bytes"})}
             }}
         });
 
@@ -395,7 +396,7 @@ namespace {
                 {"properties", {
                     {"name", {{"type", "string"}, {"description", "Patch name to toggle"}}}
                 }},
-                {"required", {"name"}}
+                {"required", json::array({"name"})}
             }}
         });
 
@@ -407,7 +408,7 @@ namespace {
                 {"properties", {
                     {"patches", {{"type", "string"}, {"description", "JSON array string of patch definitions"}}}
                 }},
-                {"required", {"patches"}}
+                {"required", json::array({"patches"})}
             }}
         });
 
@@ -433,7 +434,7 @@ namespace {
                     {"address", {{"type", "string"}, {"description", "Hex address (e.g., '0x6FAB1234')"}}},
                     {"type", {{"type", "string"}, {"description", "Value type: 'byte', 'word', 'dword', 'float' (default 'dword')"}}}
                 }},
-                {"required", {"name", "address"}}
+                {"required", json::array({"name", "address"})}
             }}
         });
 
@@ -457,6 +458,57 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "list_struct_defs"},
+            {"description", "List all known struct definitions (built-in D2 structs + loaded from structs.json)."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "get_struct_def"},
+            {"description", "Get a struct definition by name with all field definitions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Struct name (e.g., 'UnitAny')"}}}
+                }},
+                {"required", json::array({"name"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "read_struct"},
+            {"description", "Read memory at an address as a typed struct. Returns all field values with names and types."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {{"type", "string"}, {"description", "Hex address to read from"}}},
+                    {"struct_name", {{"type", "string"}, {"description", "Struct type name (e.g., 'UnitAny')"}}},
+                    {"follow_pointers", {{"type", "boolean"}, {"description", "Follow pointer fields one level (default false)"}}}
+                }},
+                {"required", json::array({"address", "struct_name"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "read_region"},
+            {"description", "Read raw memory and classify each DWORD as pointer/string/int/float/zero. For discovering unknown struct layouts."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {{"type", "string"}, {"description", "Hex address"}}},
+                    {"size", {{"type", "integer"}, {"description", "Bytes to analyze (default 64, max 1024)"}}}
+                }},
+                {"required", json::array({"address"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "save_struct_defs"},
+            {"description", "Save all struct definitions to structs.json in the game directory."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
             {"name", "read_memory"},
             {"description", "Read bytes from a memory address in the game process. Returns hex dump and interpreted values."},
             {"inputSchema", {
@@ -475,7 +527,7 @@ namespace {
                         {"description", "Output format: 'hex' (default), 'dwords', 'ascii', 'all'"}
                     }}
                 }},
-                {"required", {"address"}}
+                {"required", json::array({"address"})}
             }}
         });
 
@@ -498,7 +550,7 @@ namespace {
                         {"description", "Write a 32-bit DWORD value instead of raw bytes"}
                     }}
                 }},
-                {"required", {"address"}}
+                {"required", json::array({"address"})}
             }}
         });
 
@@ -1369,6 +1421,219 @@ namespace {
             }
             json info = {{"count", list.size()}, {"watches", list}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "list_struct_defs") {
+            auto names = StructRegistry::ListStructs();
+            json list = json::array();
+            for (auto& n : names) {
+                auto* s = StructRegistry::GetStruct(n);
+                if (s) list.push_back({{"name", n}, {"size", s->size}, {"source", s->source}, {"fields", (int)s->fields.size()}});
+            }
+            json info = {{"count", list.size()}, {"structs", list}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_struct_def") {
+            std::string sname = arguments.value("name", "");
+            auto* s = StructRegistry::GetStruct(sname);
+            if (!s) return {{"content", {{{"type", "text"}, {"text", "Struct not found: " + sname}}}}, {"isError", true}};
+
+            const char* typeNames[] = {"byte","word","dword","int","float","pointer","string","wstring","array","padding"};
+            json fields = json::array();
+            for (auto& f : s->fields) {
+                json jf = {{"name", f.name}, {"offset", f.offset}, {"type", typeNames[f.type]}, {"size", f.size}};
+                if (!f.pointsTo.empty()) jf["points_to"] = f.pointsTo;
+                if (f.arrayCount > 0) jf["array_count"] = f.arrayCount;
+                if (!f.comment.empty()) jf["comment"] = f.comment;
+                fields.push_back(jf);
+            }
+            json info = {{"name", s->name}, {"size", s->size}, {"source", s->source}, {"fields", fields}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "read_struct") {
+            std::string addrStr = arguments.value("address", "");
+            std::string sname = arguments.value("struct_name", "");
+            bool followPtrs = arguments.value("follow_pointers", false);
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            auto* s = StructRegistry::GetStruct(sname);
+            if (!s) return {{"content", {{{"type", "text"}, {"text", "Struct not found: " + sname}}}}, {"isError", true}};
+
+            // Read the struct memory
+            std::vector<BYTE> buf(s->size, 0);
+            if (!SafeMemRead(addr, buf.data(), s->size)) {
+                return {{"content", {{{"type", "text"}, {"text", "Cannot read address " + addrStr}}}}, {"isError", true}};
+            }
+
+            json fields = json::array();
+            for (auto& f : s->fields) {
+                if (f.type == StructRegistry::FIELD_PADDING) continue;
+                if (f.offset + f.size > s->size) continue;
+
+                json jf = {{"name", f.name}, {"offset", f.offset}};
+                char hexBuf[16];
+
+                switch (f.type) {
+                    case StructRegistry::FIELD_BYTE:
+                        jf["value"] = (int)buf[f.offset];
+                        break;
+                    case StructRegistry::FIELD_WORD:
+                        jf["value"] = (int)*(WORD*)(buf.data() + f.offset);
+                        break;
+                    case StructRegistry::FIELD_DWORD:
+                    case StructRegistry::FIELD_INT: {
+                        DWORD v = *(DWORD*)(buf.data() + f.offset);
+                        jf["value"] = (int)v;
+                        snprintf(hexBuf, sizeof(hexBuf), "0x%08X", v);
+                        jf["hex"] = hexBuf;
+                        break;
+                    }
+                    case StructRegistry::FIELD_FLOAT: {
+                        float v = *(float*)(buf.data() + f.offset);
+                        jf["value"] = v;
+                        break;
+                    }
+                    case StructRegistry::FIELD_POINTER: {
+                        DWORD v = *(DWORD*)(buf.data() + f.offset);
+                        snprintf(hexBuf, sizeof(hexBuf), "0x%08X", v);
+                        jf["value"] = hexBuf;
+                        jf["is_null"] = (v == 0);
+                        if (!f.pointsTo.empty()) jf["points_to"] = f.pointsTo;
+
+                        // Follow pointer one level if requested
+                        if (followPtrs && v != 0 && !f.pointsTo.empty()) {
+                            auto* childStruct = StructRegistry::GetStruct(f.pointsTo);
+                            if (childStruct) {
+                                std::vector<BYTE> childBuf(childStruct->size, 0);
+                                if (SafeMemRead(v, childBuf.data(), childStruct->size)) {
+                                    json childFields = json::array();
+                                    for (auto& cf : childStruct->fields) {
+                                        if (cf.type == StructRegistry::FIELD_PADDING) continue;
+                                        if (cf.offset + cf.size > childStruct->size) continue;
+                                        json cjf = {{"name", cf.name}, {"offset", cf.offset}};
+                                        switch (cf.type) {
+                                            case StructRegistry::FIELD_BYTE: cjf["value"] = (int)childBuf[cf.offset]; break;
+                                            case StructRegistry::FIELD_WORD: cjf["value"] = (int)*(WORD*)(childBuf.data() + cf.offset); break;
+                                            case StructRegistry::FIELD_DWORD:
+                                            case StructRegistry::FIELD_INT: {
+                                                DWORD cv = *(DWORD*)(childBuf.data() + cf.offset);
+                                                cjf["value"] = (int)cv;
+                                                char chex[16]; snprintf(chex, sizeof(chex), "0x%08X", cv);
+                                                cjf["hex"] = chex;
+                                                break;
+                                            }
+                                            case StructRegistry::FIELD_POINTER: {
+                                                DWORD cv = *(DWORD*)(childBuf.data() + cf.offset);
+                                                char chex[16]; snprintf(chex, sizeof(chex), "0x%08X", cv);
+                                                cjf["value"] = chex;
+                                                break;
+                                            }
+                                            case StructRegistry::FIELD_STRING: {
+                                                char str[64] = {};
+                                                int len = cf.size < 63 ? cf.size : 63;
+                                                memcpy(str, childBuf.data() + cf.offset, len);
+                                                cjf["value"] = str;
+                                                break;
+                                            }
+                                            default: break;
+                                        }
+                                        childFields.push_back(cjf);
+                                    }
+                                    jf["expanded"] = childFields;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    case StructRegistry::FIELD_STRING: {
+                        char str[64] = {};
+                        int len = f.size < 63 ? f.size : 63;
+                        memcpy(str, buf.data() + f.offset, len);
+                        jf["value"] = str;
+                        break;
+                    }
+                    default: break;
+                }
+
+                if (!f.comment.empty()) jf["comment"] = f.comment;
+                fields.push_back(jf);
+            }
+
+            json info = {{"struct", sname}, {"address", addrStr}, {"size", s->size}, {"fields", fields}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "read_region") {
+            std::string addrStr = arguments.value("address", "");
+            int size = arguments.value("size", 64);
+            if (size > 1024) size = 1024;
+            if (size < 4) size = 4;
+            size = (size + 3) & ~3; // align to 4
+
+            DWORD addr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+            std::vector<BYTE> buf(size, 0);
+            if (!SafeMemRead(addr, buf.data(), size)) {
+                return {{"content", {{{"type", "text"}, {"text", "Cannot read address " + addrStr}}}}, {"isError", true}};
+            }
+
+            // Classify each DWORD
+            json dwords = json::array();
+            for (int i = 0; i < size; i += 4) {
+                DWORD val = *(DWORD*)(buf.data() + i);
+                char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", addr + i);
+                char valBuf[16]; snprintf(valBuf, sizeof(valBuf), "0x%08X", val);
+
+                std::string classification = "unknown";
+                if (val == 0) {
+                    classification = "zero";
+                } else if (val >= 0x00400000 && val < 0x7FFFFFFF) {
+                    // Looks like a valid user-mode pointer
+                    BYTE test;
+                    if (SafeMemRead(val, &test, 1)) {
+                        classification = "pointer";
+                    } else {
+                        classification = "integer";
+                    }
+                } else if (val < 0x10000) {
+                    classification = "small_int";
+                } else {
+                    // Check if it could be ASCII
+                    BYTE b0 = buf[i], b1 = buf[i+1], b2 = buf[i+2], b3 = buf[i+3];
+                    if (b0 >= 32 && b0 < 127 && b1 >= 32 && b1 < 127) {
+                        classification = "possible_string";
+                    } else {
+                        classification = "integer";
+                    }
+                }
+
+                json entry = {
+                    {"offset", i},
+                    {"address", addrBuf},
+                    {"hex", valBuf},
+                    {"value", (int)val},
+                    {"type", classification}
+                };
+                dwords.push_back(entry);
+            }
+
+            json info = {{"address", addrStr}, {"size", size}, {"dwords", dwords}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "save_struct_defs") {
+            char exePath[MAX_PATH];
+            GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+            std::string dir(exePath);
+            dir = dir.substr(0, dir.find_last_of("\\/") + 1);
+            std::string path = dir + "structs.json";
+
+            if (StructRegistry::SaveToFile(path)) {
+                json info = {{"saved", true}, {"file", path}, {"count", StructRegistry::GetStructCount()}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+            return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
         }
 
         if (name == "read_memory") {

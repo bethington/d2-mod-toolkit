@@ -15,6 +15,7 @@
 #include "AutoPickup.h"
 #include "HookManager.h"
 #include "CrashCatcher.h"
+#include "StructRegistry.h"
 
 string BH::path;
 HINSTANCE BH::instance;
@@ -137,7 +138,8 @@ void BH::Initialize()
 		DebugPanel::Init();
 	}
 
-	// Initialize crash catcher and hook manager
+	// Initialize struct registry, crash catcher, and hook manager
+	StructRegistry::Init();
 	CrashCatcher::Init();
 	HookManager::Init();
 
