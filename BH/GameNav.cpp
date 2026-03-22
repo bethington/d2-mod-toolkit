@@ -217,8 +217,6 @@ namespace GameNav {
 
             case OOG_CHAR_SELECT: {
                 g_status.currentScreen = "Character Select";
-                // TODO: if charName specified, find and click on that character in the list
-                // For now, just click OK to use whatever is selected
                 g_status.message = "Clicking OK...";
                 // OK button at bottom-right: (627, 572) size 128x35
                 Control* btn = FindButton(600, 760, 560, 610);
@@ -228,7 +226,7 @@ namespace GameNav {
                 } else {
                     g_status.message = "Can't find OK button";
                     g_retryCount++;
-                    if (g_retryCount > 10) {
+                    if (g_retryCount > 15) {
                         g_status.state = NAV_FAILED;
                     }
                 }
@@ -275,14 +273,21 @@ namespace GameNav {
 
             case OOG_DIALOG: {
                 g_status.currentScreen = "Dialog";
-                g_status.message = "Dialog detected — clicking buttons...";
-                // Click each button with OnPress, trying all of them
+                g_status.message = "Clicking OK on dialog...";
+                // Click ONLY the rightmost button (OK in D2 dialogs)
+                // Left button is typically Cancel which loops back
+                Control* okBtn = nullptr;
                 Control* p = *p_D2WIN_FirstControl;
                 while (p) {
                     if (p->dwType == CTRL_TYPE_BUTTON && p->OnPress) {
-                        ClickControl(p);
+                        if (!okBtn || p->dwPosX > okBtn->dwPosX) {
+                            okBtn = p;
+                        }
                     }
                     p = p->pNext;
+                }
+                if (okBtn) {
+                    ClickControl(okBtn);
                 }
                 g_retryCount++;
                 if (g_retryCount > 30) {
