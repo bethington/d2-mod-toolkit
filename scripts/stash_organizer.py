@@ -835,22 +835,21 @@ class StashOrganizer:
                 print(f"  SKIP {name}: cursor stuck")
                 continue
 
-            # Pick from inventory
-            self.mcp.call("item_to_cursor", {"item_id": uid})
-            time.sleep(0.3)
+            # Use move_item for atomic pick+place with cursor verify
+            result = self.mcp.call("move_item", {
+                "item_id": uid, "dest_container": "stash",
+                "dest_x": spot[0], "dest_y": spot[1], "dest_tab": target_tab,
+            }, timeout=15)
 
-            # Place in stash
-            self.mcp.call("cursor_to_container", {
-                "item_id": uid, "x": spot[0], "y": spot[1], "container": "stash"
-            })
-            time.sleep(0.3)
-
-            cursor = self.mcp.call("get_cursor_item")
-            if cursor.get("has_item"):
+            status = result.get("status", "unknown")
+            if status == "moved":
+                print(f"  OK   {name} -> tab {target_tab} at {spot}")
+            elif status == "swapped":
                 print(f"  SWAP {name} -> tab {target_tab} at {spot}")
                 self._clear_cursor()
             else:
-                print(f"  OK   {name} -> tab {target_tab} at {spot}")
+                print(f"  FAIL {name}: {status}")
+                self._clear_cursor()
 
         if dry_run:
             print("\n[DRY RUN] No items moved.")
