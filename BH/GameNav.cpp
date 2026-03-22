@@ -78,6 +78,7 @@ namespace {
         OOG_MAIN_MENU,
         OOG_CHAR_SELECT,
         OOG_DIFFICULTY,
+        OOG_DIALOG,       // OK/Cancel popup (e.g., "play single player?" warning)
         OOG_IN_GAME,
         OOG_LOADING,
         OOG_OTHER
@@ -93,37 +94,55 @@ namespace {
         Control* pCtrl = *p_D2WIN_FirstControl;
         if (!pCtrl) return OOG_LOADING;
 
-        ControlCounts cc = CountControls();
+        // Scan all controls once for pattern matching
+        bool hasOKButton = false;       // bottom-right button (627, 572)
+        int type4Count = 0;             // character slot type
+        bool hasDiffButtons = false;    // difficulty buttons at x~264, y~297-383
+        int diffButtonCount = 0;
+        int buttonCount = 0;
 
-        // Screen identification by button count and layout:
-        // Main Menu: 7 buttons, all at x=264
-        // Character Select: 5 buttons, OK at (627,572), Create/Convert/Delete at y=528
-        // Difficulty: 3-4 buttons stacked vertically around x=264
-
-        // Check for Character Select: has an OK button at bottom-right (627, 572)
-        // and character slots (type 4) in the middle
-        if (cc.buttons >= 4 && cc.buttons <= 6) {
-            // Look for OK button at bottom-right
-            Control* pOK = *p_D2WIN_FirstControl;
-            bool hasOKButton = false;
-            int type4Count = 0;
-            while (pOK) {
-                if (pOK->dwType == CTRL_TYPE_BUTTON && pOK->dwPosX > 600 && pOK->dwPosY > 550) {
-                    hasOKButton = true;
+        Control* p = pCtrl;
+        while (p) {
+            if (p->dwType == CTRL_TYPE_BUTTON) {
+                buttonCount++;
+                if (p->dwPosX > 600 && p->dwPosY > 550) hasOKButton = true;
+                // Difficulty buttons: x around 264, y between 280-400, width ~272
+                if (p->dwPosX >= 250 && p->dwPosX <= 280 &&
+                    p->dwPosY >= 280 && p->dwPosY <= 400 &&
+                    p->dwSizeX >= 200 && p->dwSizeX <= 300) {
+                    diffButtonCount++;
                 }
-                if (pOK->dwType == 4) type4Count++;
-                pOK = pOK->pNext;
             }
-            if (hasOKButton && type4Count >= 4) {
-                return OOG_CHAR_SELECT;
-            }
+            if (p->dwType == 4) type4Count++;
+            p = p->pNext;
+        }
+        hasDiffButtons = (diffButtonCount >= 2);
+
+        // Priority 1: Difficulty select (overlay on char select)
+        // Identified by 2-3 difficulty buttons at x~264, y~297-383
+        if (hasDiffButtons) {
+            return OOG_DIFFICULTY;
         }
 
-        if (cc.buttons >= 6) {
+        // Priority 2: Character Select — has OK button + character slots
+        if (hasOKButton && type4Count >= 4) {
+            return OOG_CHAR_SELECT;
+        }
+
+        // Priority 3: Main Menu — many buttons, no char slots
+        if (buttonCount >= 5 && type4Count == 0) {
             return OOG_MAIN_MENU;
         }
 
-        if (cc.buttons >= 2 && cc.buttons <= 4 && cc.total <= 10) {
+        // Priority 4: Dialog popup — 2-3 buttons, few total controls
+        // Dialogs like "Are you sure?" or error messages
+        // Key signature: small number of buttons (1-3), no char slots (type4 < 8)
+        if (buttonCount >= 1 && buttonCount <= 3 && type4Count < 8 && !hasDiffButtons) {
+            return OOG_DIALOG;
+        }
+
+        // Fallback: few buttons, might be difficulty (pre-overlay)
+        if (buttonCount >= 2 && buttonCount <= 4 && type4Count == 0) {
             return OOG_DIFFICULTY;
         }
 
@@ -254,13 +273,62 @@ namespace GameNav {
                 return;
             }
 
+            case OOG_DIALOG: {
+                g_status.currentScreen = "Dialog";
+                g_status.message = "Dismissing dialog...";
+                // Strategy: send keyboard input to dismiss dialogs
+                // ESC closes most dialogs, ENTER confirms them
+                HWND hWnd = FindWindow(nullptr, "Diablo II");
+                if (hWnd) {
+                    if (g_retryCount % 2 == 0) {
+                        // Try ENTER to confirm
+                        PostMessage(hWnd, WM_KEYDOWN, VK_RETURN, 0);
+                        PostMessage(hWnd, WM_KEYUP, VK_RETURN, 0);
+                    } else {
+                        // Try ESC to cancel
+                        PostMessage(hWnd, WM_KEYDOWN, VK_ESCAPE, 0);
+                        PostMessage(hWnd, WM_KEYUP, VK_ESCAPE, 0);
+                    }
+                }
+                // Also try clicking buttons via OnPress as backup
+                Control* p = *p_D2WIN_FirstControl;
+                while (p) {
+                    if (p->dwType == CTRL_TYPE_BUTTON && p->OnPress) {
+                        ClickControl(p);
+                        break;
+                    }
+                    p = p->pNext;
+                }
+                g_retryCount++;
+                return;
+            }
+
             default:
                 g_status.currentScreen = "Unknown";
-                g_status.message = "Unrecognized screen, waiting...";
-                g_retryCount++;
-                if (g_retryCount > 20) {
-                    g_status.state = NAV_FAILED;
-                    g_status.message = "Failed: stuck on unknown screen";
+                // After difficulty click (step >= 3), just wait for game to load
+                if (g_status.step >= 3) {
+                    g_status.message = "Waiting for game to load...";
+                    g_retryCount++;
+                    if (g_retryCount > 60) { // ~60 seconds
+                        g_status.state = NAV_FAILED;
+                        g_status.message = "Failed: game load timeout";
+                    }
+                } else {
+                    g_status.message = "Unrecognized screen, trying dialog...";
+                    // Try clicking any visible button to dismiss unknown screens
+                    Control* anyBtn = *p_D2WIN_FirstControl;
+                    while (anyBtn) {
+                        if (anyBtn->dwType == CTRL_TYPE_BUTTON && anyBtn->OnPress) {
+                            ClickControl(anyBtn);
+                            break;
+                        }
+                        anyBtn = anyBtn->pNext;
+                    }
+                    g_retryCount++;
+                    if (g_retryCount > 40) {
+                        g_status.state = NAV_FAILED;
+                        g_status.message = "Failed: stuck on unknown screen";
+                    }
                 }
                 return;
         }
