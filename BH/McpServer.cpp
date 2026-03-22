@@ -199,6 +199,52 @@ namespace {
         }
     }
 
+    // Materials tab switch helper (needs inline asm, can't be in a local struct)
+    static DWORD __cdecl SwitchToMaterialsTab() {
+        HMODULE pd2 = GetModuleHandle("ProjectDiablo.dll");
+        if (!pd2) return 0;
+        DWORD* pSt = (DWORD*)(*(DWORD*)((DWORD)pd2 + 0x00410688));
+        if (*pSt != 0x0C) return 0;
+        DWORD* pTab = (DWORD*)((DWORD)pd2 + 0x0040edd4);
+        if (*pTab == 10) return 0;
+        DWORD* pPend = (DWORD*)((DWORD)pd2 + 0x0030de48);
+        if (*pPend != 0) return 0;
+        DWORD dAddr = (DWORD)pd2 + 0x0023ead0;
+        WORD pkt = 0x0B55;
+        __asm {
+            lea ecx, pkt
+            mov edx, 2
+            call dAddr
+        }
+        return 1;
+    }
+
+    // Switch stash tab (0-10) via GameCallQueue. Returns true on success.
+    static bool SwitchStashTab(int tab) {
+        if (tab < 0 || tab > 10) return false;
+        HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+        if (!hPD2) return false;
+
+        static const DWORD tabRVA[] = {
+            0x001906c0, 0x00190700, 0x00190740, 0x00190780, 0x001907c0,
+            0x00190800, 0x00190840, 0x00190880, 0x001908c0, 0x00190900,
+        };
+
+        GameCallQueue::PendingCall call = {};
+        if (tab <= 9) {
+            call.address = (DWORD)hPD2 + tabRVA[tab];
+            call.argCount = 0;
+            call.convention = 1;
+        } else {
+            call.address = (DWORD)&SwitchToMaterialsTab;
+            call.argCount = 0;
+            call.convention = 1;
+        }
+        bool ok = GameCallQueue::CallOnGameThread(call, 3000);
+        if (ok) Sleep(300);
+        return ok;
+    }
+
     // MCP protocol version
     static const char* MCP_VERSION = "2024-11-05";
 
@@ -606,7 +652,7 @@ namespace {
 
         tools.push_back({
             {"name", "switch_stash_tab"},
-            {"description", "Switch to a stash tab by clicking on it. 0=Personal, 1-9=Shared 1-9. Stash must be open."},
+            {"description", "Switch to a stash tab. 0=Personal, 1-9=Shared I-IX, 10=Materials. Stash must be open."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
@@ -737,6 +783,24 @@ namespace {
                     {"container", {{"type", "string"}, {"description", "'inventory' (default), 'stash', 'cube', 'trade'"}}}
                 }},
                 {"required", json::array({"item_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "move_item"},
+            {"description", "Move an item from its current location to a target container+position. Handles: pick to cursor, optional tab switch, place at target, verify. Returns cursor state after move (for swap detection)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID to move"}}},
+                    {"dest_container", {{"type", "string"}, {"description", "'inventory', 'stash', 'cube'. Default: 'stash'"}}},
+                    {"dest_x", {{"type", "integer"}, {"description", "Target grid X"}}},
+                    {"dest_y", {{"type", "integer"}, {"description", "Target grid Y"}}},
+                    {"dest_tab", {{"type", "integer"}, {"description", "Target stash tab (0-10). Only needed for cross-tab moves. -1=same tab (default)"}}},
+                    {"pick_wait_ms", {{"type", "integer"}, {"description", "Wait after pick (ms). Default: 200"}}},
+                    {"place_wait_ms", {{"type", "integer"}, {"description", "Wait after place (ms). Default: 200"}}}
+                }},
+                {"required", json::array({"item_id", "dest_x", "dest_y"})}
             }}
         });
 
@@ -2115,38 +2179,86 @@ namespace {
 
         if (name == "switch_stash_tab") {
             int tab = arguments.value("tab", 0);
-            if (tab < 0 || tab > 9) {
-                return {{"content", {{{"type", "text"}, {"text", "Tab must be 0-9"}}}}, {"isError", true}};
+            if (tab < 0 || tab > 10) {
+                return {{"content", {{{"type", "text"}, {"text", "Tab must be 0-10 (0=Personal, 1-9=Shared I-IX, 10=Materials)"}}}}, {"isError", true}};
             }
 
-            HWND hWnd = FindWindow(nullptr, "Diablo II");
-            if (!hWnd) {
-                return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
             }
 
-            // Tab button positions in game client coordinates (1068x600)
-            // P=15, I=55, II=82, III=110, IV=140, V=168, VI=198, VII=230, VIII=265, IX=298
-            int tabX[] = { 15, 55, 82, 110, 140, 168, 198, 230, 265, 298 };
-            int tabY = 18;
+            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+            if (!hPD2) {
+                return {{"content", {{{"type", "text"}, {"text", "ProjectDiablo.dll not loaded"}}}}, {"isError", true}};
+            }
 
-            POINT pt = { tabX[tab], tabY };
-            ClientToScreen(hWnd, &pt);
-            SetCursorPos(pt.x, pt.y);
-            Sleep(50);
-            SetForegroundWindow(hWnd);
-            Sleep(100);
+            // PD2 tab click handler functions in ProjectDiablo.dll
+            // Each is void(void) with built-in guards (stash open check, already-on-tab check)
+            // RVAs from Ghidra analysis of InitStashTabs / g_nActiveStashTab xrefs
+            // Internally they send a 2-byte packet via the dispatcher:
+            //   byte[0] = 0x55 (stash tab switch command)
+            //   byte[1] = 1-based tab number
+            static const DWORD tabHandlerRVA[] = {
+                0x001906c0, // Tab 0 (Personal)  -> sends 0x55,0x01
+                0x00190700, // Tab 1 (Shared I)   -> sends 0x55,0x02
+                0x00190740, // Tab 2 (Shared II)  -> sends 0x55,0x03
+                0x00190780, // Tab 3 (Shared III) -> sends 0x55,0x04
+                0x001907c0, // Tab 4 (Shared IV)  -> sends 0x55,0x05
+                0x00190800, // Tab 5 (Shared V)   -> sends 0x55,0x06
+                0x00190840, // Tab 6 (Shared VI)  -> sends 0x55,0x07
+                0x00190880, // Tab 7 (Shared VII) -> sends 0x55,0x08
+                0x001908c0, // Tab 8 (Shared VIII)-> sends 0x55,0x09
+                0x00190900, // Tab 9 (Shared IX)  -> sends 0x55,0x0A
+            };
 
-            INPUT inputs[2] = {};
-            inputs[0].type = INPUT_MOUSE;
-            inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-            inputs[1].type = INPUT_MOUSE;
-            inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-            SendInput(1, &inputs[0], sizeof(INPUT));
-            Sleep(50);
-            SendInput(1, &inputs[1], sizeof(INPUT));
-            Sleep(500); // wait for stash data to load
+            GameCallQueue::PendingCall call = {};
 
-            json info = {{"status", "switched"}, {"tab", tab}, {"click_x", tabX[tab]}, {"click_y", tabY}};
+            if (tab <= 9) {
+                call.address = (DWORD)hPD2 + tabHandlerRVA[tab];
+                call.argCount = 0;
+                call.convention = 1; // cdecl
+            } else {
+                // Tab 10 (Materials): no dedicated handler in PD2.
+                // Tab handlers send a 2-byte command {0x55, 1-based_tab} via FUN_1023ead0
+                // which uses a non-standard calling convention: ECX=packet_ptr, EDX=length, EBX=length
+                // We replicate this with inline asm via a static helper called on the game thread.
+                struct MaterialsTabHelper {
+                    static DWORD __cdecl Switch() {
+                        HMODULE pd2 = GetModuleHandle("ProjectDiablo.dll");
+                        if (!pd2) return 0;
+                        // Check guards: stash must be open, not already on tab 10, no pending op
+                        DWORD* pStashState = (DWORD*)(*(DWORD*)((DWORD)pd2 + 0x00410688));
+                        if (*pStashState != 0x0C) return 0; // stash not open
+                        DWORD* pActiveTab = (DWORD*)((DWORD)pd2 + 0x0040edd4);
+                        if (*pActiveTab == 10) return 0; // already on Materials
+                        DWORD* pPending = (DWORD*)((DWORD)pd2 + 0x0030de48);
+                        if (*pPending != 0) return 0; // pending operation
+                        // Call FUN_1023ead0 the same way tab handlers do:
+                        // EDX = 2 (packet length), ECX = ptr to packet {0x55, 0x0B}
+                        DWORD dispatchAddr = (DWORD)pd2 + 0x0023ead0;
+                        WORD packet = 0x0B55; // little-endian: byte[0]=0x55, byte[1]=0x0B
+                        __asm {
+                            lea ecx, packet
+                            mov edx, 2
+                            call dispatchAddr
+                        }
+                        return 1;
+                    }
+                };
+                call.address = (DWORD)&MaterialsTabHelper::Switch;
+                call.argCount = 0;
+                call.convention = 1; // cdecl
+            }
+
+            bool ok = GameCallQueue::CallOnGameThread(call, 3000);
+            if (!ok) {
+                json err = {{"status", "failed"}, {"tab", tab}, {"crashed", call.crashed}};
+                return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
+            }
+
+            Sleep(300); // wait for stash data to load
+
+            json info = {{"status", "switched"}, {"tab", tab}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
@@ -2160,25 +2272,34 @@ namespace {
             }
             int px = pPlayer->pPath->xPos, py = pPlayer->pPath->yPos;
 
-            // Find the stash object — scan for objects with "Stash" or "Bank" in name
+            // Find the stash object via D2CLIENT unit hash table (type 2 = objects)
+            // The unit table has 128 buckets per type, objects start at bucket index 256
             UnitAny* stash = nullptr;
             int bestDist = 999;
-            for (Room1* room = pPlayer->pAct->pRoom1; room; room = room->pRoomNext) {
-                for (UnitAny* u = room->pUnitFirst; u; u = u->pListNext) {
-                    if (u->dwType != 2) continue;
-                    char objName[64] = {};
-                    SafeGetUnitName(u, objName, sizeof(objName));
-                    // Check for stash-related names
-                    if (strstr(objName, "tash") || strstr(objName, "Bank") || strstr(objName, "bank") ||
-                        u->dwTxtFileNo == 267 || u->dwTxtFileNo == 580 || u->dwTxtFileNo == 581) {
-                        int ux = u->pPath ? u->pPath->xPos : 0;
-                        int uy = u->pPath ? u->pPath->yPos : 0;
-                        int dx = ux - px, dy = uy - py;
-                        int dist = (int)sqrt((double)(dx*dx + dy*dy));
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            stash = u;
+            UnitAny** pTable = (UnitAny**)*Var_D2CLIENT_pUnitTable();
+            if (pTable) {
+                for (int bucket = 0; bucket < 128; bucket++) {
+                    UnitAny* u = pTable[256 + bucket]; // type 2 (object) starts at 2*128
+                    while (u) {
+                        if (u->dwType == 2) {
+                            // Check for stash by txtFileNo or name
+                            bool isStash = (u->dwTxtFileNo == 267 || u->dwTxtFileNo == 580 || u->dwTxtFileNo == 581);
+                            if (!isStash) {
+                                char objName[64] = {};
+                                SafeGetUnitName(u, objName, sizeof(objName));
+                                isStash = (strstr(objName, "tash") || strstr(objName, "Bank") || strstr(objName, "bank"));
+                            }
+                            if (isStash && u->pPath) {
+                                int ux = u->pPath->xPos, uy = u->pPath->yPos;
+                                int dx = ux - px, dy = uy - py;
+                                int dist = (int)sqrt((double)(dx*dx + dy*dy));
+                                if (dist < bestDist) {
+                                    bestDist = dist;
+                                    stash = u;
+                                }
+                            }
                         }
+                        u = u->pListNext;
                     }
                 }
             }
@@ -2311,6 +2432,107 @@ namespace {
 
             json info = {{"status", "placed"}, {"item_id", itemId}, {"x", x}, {"y", y}, {"container", container}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "move_item") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInventory) {
+                return {{"content", {{{"type", "text"}, {"text", "No player/inventory"}}}}, {"isError", true}};
+            }
+
+            DWORD itemId = arguments.value("item_id", (DWORD)0);
+            std::string destContainer = arguments.value("dest_container", "stash");
+            int destX = arguments.value("dest_x", 0);
+            int destY = arguments.value("dest_y", 0);
+            int destTab = arguments.value("dest_tab", -1);
+            int pickWait = arguments.value("pick_wait_ms", 200);
+            int placeWait = arguments.value("place_wait_ms", 200);
+
+            if (pickWait < 50) pickWait = 50;
+            if (pickWait > 2000) pickWait = 2000;
+            if (placeWait < 50) placeWait = 50;
+            if (placeWait > 2000) placeWait = 2000;
+
+            int dest = 0;
+            if (destContainer == "stash") dest = 4;
+            else if (destContainer == "cube") dest = 3;
+            else if (destContainer == "trade") dest = 2;
+
+            // Step 1: Check if cursor is empty (abort if something already on cursor)
+            UnitAny* pCursorBefore = pPlayer->pInventory->pCursorItem;
+            if (pCursorBefore) {
+                json err = {{"status", "cursor_occupied"}, {"cursor_item_id", (int)pCursorBefore->dwUnitId}};
+                return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
+            }
+
+            // Step 2: Pick item to cursor (packet 0x19)
+            {
+                BYTE pkt[5] = {};
+                pkt[0] = 0x19;
+                *(DWORD*)&pkt[1] = itemId;
+                D2NET_SendPacket(5, 1, pkt);
+            }
+            Sleep(pickWait);
+
+            // Step 3: Verify item is on cursor
+            UnitAny* pCursorAfterPick = pPlayer->pInventory->pCursorItem;
+            if (!pCursorAfterPick || pCursorAfterPick->dwUnitId != itemId) {
+                DWORD actualId = pCursorAfterPick ? pCursorAfterPick->dwUnitId : 0;
+                json err = {{"status", "pick_failed"}, {"item_id", (int)itemId},
+                            {"cursor_item_id", (int)actualId}};
+                return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
+            }
+
+            // Step 4: Tab switch if needed
+            if (destTab >= 0 && destTab <= 10) {
+                bool tabOk = SwitchStashTab(destTab);
+                if (!tabOk) {
+                    // Tab switch failed — item is still on cursor, caller must handle
+                    json err = {{"status", "tab_switch_failed"}, {"item_id", (int)itemId},
+                                {"dest_tab", destTab}, {"cursor_has_item", true}};
+                    return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
+                }
+            }
+
+            // Step 5: Place item (packet 0x18)
+            {
+                BYTE pkt[17] = {};
+                pkt[0] = 0x18;
+                *(DWORD*)&pkt[1] = itemId;
+                *(DWORD*)&pkt[5] = destX;
+                *(DWORD*)&pkt[9] = destY;
+                *(DWORD*)&pkt[13] = dest;
+                D2NET_SendPacket(17, 1, pkt);
+            }
+            Sleep(placeWait);
+
+            // Step 6: Check result — cursor should be empty (or hold swapped item)
+            UnitAny* pCursorAfterPlace = pPlayer->pInventory->pCursorItem;
+            json result = {
+                {"status", "moved"},
+                {"item_id", (int)itemId},
+                {"dest_container", destContainer},
+                {"dest_x", destX},
+                {"dest_y", destY},
+            };
+            if (destTab >= 0) result["dest_tab"] = destTab;
+
+            if (pCursorAfterPlace) {
+                // Item swap occurred — another item was displaced
+                char swapName[64] = {};
+                SafeGetUnitName(pCursorAfterPlace, swapName, sizeof(swapName));
+                result["status"] = "swapped";
+                result["swapped_item"] = {
+                    {"unit_id", (int)pCursorAfterPlace->dwUnitId},
+                    {"code", (int)pCursorAfterPlace->dwTxtFileNo},
+                    {"name", swapName[0] ? swapName : "?"}
+                };
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
 
         if (name == "resolve_function") {

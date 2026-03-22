@@ -7,6 +7,7 @@
 #include "CrashCatcher.h"
 #include "PatchManager.h"
 #include "GamePause.h"
+#include "GameCallQueue.h"
 #include "MemWatch.h"
 #include "BH.h"
 
@@ -1041,16 +1042,57 @@ namespace {
                 }
 
                 // Tab selector buttons
-                const char* tabLabels[] = {"P", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
-                for (int t = 0; t < 10; t++) {
+                const char* tabLabels[] = {"P", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "M"};
+                for (int t = 0; t < 11; t++) {
                     if (t > 0) ImGui::SameLine();
                     bool isActive = (currentTab == t);
                     if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
                     if (ImGui::SmallButton(tabLabels[t])) {
-                        // Click the stash tab
-                        McpServer::GetRequestCount(); // just to verify MCP is up
-                        // Switch tab via click_screen would need game thread
-                        // For now just record which tab to view
+                        // Switch tab via PD2's internal click handler functions
+                        if (t != currentTab) {
+                            static const DWORD tabHandlerRVA[] = {
+                                0x001906c0, 0x00190700, 0x00190740, 0x00190780, 0x001907c0,
+                                0x00190800, 0x00190840, 0x00190880, 0x001908c0, 0x00190900,
+                            };
+                            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+                            if (hPD2) {
+                                GameCallQueue::PendingCall call = {};
+                                if (t <= 9) {
+                                    call.address = (DWORD)hPD2 + tabHandlerRVA[t];
+                                    call.argCount = 0;
+                                    call.convention = 1; // cdecl
+                                } else {
+                                    // Materials tab: use same packet dispatch as other handlers
+                                    // but must be called from game thread with correct asm
+                                    struct MatTabHelper {
+                                        static DWORD __cdecl Switch() {
+                                            HMODULE pd2 = GetModuleHandle("ProjectDiablo.dll");
+                                            if (!pd2) return 0;
+                                            DWORD* pSt = (DWORD*)(*(DWORD*)((DWORD)pd2 + 0x00410688));
+                                            if (*pSt != 0x0C) return 0;
+                                            DWORD* pTab = (DWORD*)((DWORD)pd2 + 0x0040edd4);
+                                            if (*pTab == 10) return 0;
+                                            DWORD* pPend = (DWORD*)((DWORD)pd2 + 0x0030de48);
+                                            if (*pPend != 0) return 0;
+                                            DWORD dAddr = (DWORD)pd2 + 0x0023ead0;
+                                            WORD pkt = 0x0B55;
+                                            __asm {
+                                                lea ecx, pkt
+                                                mov edx, 2
+                                                call dAddr
+                                            }
+                                            return 1;
+                                        }
+                                    };
+                                    call.address = (DWORD)&MatTabHelper::Switch;
+                                    call.argCount = 0;
+                                    call.convention = 1;
+                                }
+                                GameCallQueue::CallOnGameThread(call, 3000);
+                                Sleep(300);
+                            }
+                        }
+
                         g_stashScanTab = t;
                         g_stashScanItems.clear();
 
@@ -1063,7 +1105,7 @@ namespace {
                                     StashItem si = {};
                                     si.unitId = pItem->dwUnitId;
                                     si.code = pItem->dwTxtFileNo;
-                                    si.tab = currentTab;
+                                    si.tab = t;
                                     if (pItem->pPath) {
                                         ItemPath* ip = (ItemPath*)pItem->pPath;
                                         si.gridX = (int)ip->dwPosX;
