@@ -226,6 +226,15 @@ class ItemEvaluator:
             else:
                 break
 
+        # Protected items — NEVER vendor
+        protected = ["tome of town portal", "tome of identify", "horadric cube",
+                      "key of terror", "key of hate", "key of destruction",
+                      "voidstone", "vision of terror", "pandemonium talisman",
+                      "skeleton key", "larzuk", "puzzlebox", "worldstone shard",
+                      "demonic cube", "relic of the ancients", "bone fragments"]
+        if any(p in clean_name for p in protected):
+            return ("keep", "protected item", data)
+
         # Determine item category
         if "small charm" in clean_name:
             return self._eval_small_charm(data, stats)
