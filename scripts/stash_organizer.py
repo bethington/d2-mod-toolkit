@@ -188,30 +188,40 @@ class Container:
 # ---- Tab Layout Configuration ----
 
 DEFAULT_LAYOUT = {
-    0: {"name": "Personal (Sorc)", "categories": []},  # Don't touch personal
-    1: {"name": "Jewelry & Charms", "categories": [
-        "Ring", "Amulet", "Grand Charm", "Large Charm", "Small Charm", "Charm"
+    0: {"name": "Personal", "categories": []},  # Don't touch personal
+    1: {"name": "Charms", "categories": [
+        "Grand Charm", "Large Charm", "Small Charm", "Charm"
     ]},
-    2: {"name": "Gems, Jewels, Runes", "categories": [
-        "Gem", "Jewel", "Rune"
+    2: {"name": "Jewels & Gems", "categories": [
+        "Jewel", "Gem", "Rune"
     ]},
-    3: {"name": "Gloves & Boots", "categories": ["Gloves", "Boots"]},
-    4: {"name": "Chest Armor & Belts", "categories": ["Body Armor", "Belt"]},
-    5: {"name": "Helmets & Shields", "categories": ["Helmet", "Shield"]},
-    6: {"name": "Weapons: Spears/Polearms", "categories": [
+    3: {"name": "Rings & Amulets", "categories": [
+        "Ring", "Amulet"
+    ]},
+    4: {"name": "Armor & Belts", "categories": [
+        "Body Armor", "Belt"
+    ]},
+    5: {"name": "Gloves, Boots, Helmets", "categories": [
+        "Gloves", "Boots", "Helmet", "Shield"
+    ]},
+    6: {"name": "Melee Weapons", "categories": [
+        "Sword", "Axe", "Mace", "Assassin Claw",
         "Spear/Javelin", "Polearm"
     ]},
-    7: {"name": "Weapons: Swords/Axes/Maces", "categories": [
-        "Sword", "Axe", "Mace", "Assassin Claw"
-    ]},
-    8: {"name": "Caster & Ranged", "categories": [
+    7: {"name": "Caster & Ranged", "categories": [
         "Caster Weapon", "Ranged Weapon"
     ]},
-    9: {"name": "Special & Overflow", "categories": [
-        "Token", "PD2 Special", "Potion", "Scroll/Tome", "Key", "Ear",
-        "Quest", "Other"
+    8: {"name": "PD2 Special & Tokens", "categories": [
+        "Token", "PD2 Special", "Key", "Quest"
+    ]},
+    9: {"name": "Overflow & Misc", "categories": [
+        "Potion", "Scroll/Tome", "Ear", "Other"
     ]},
 }
+
+# Keep-in-place threshold: if >= this % of a tab's items already match
+# the target category, don't move those items (they're already home)
+KEEP_IN_PLACE_THRESHOLD = 0.5  # 50%
 
 
 # ---- Organizer ----
@@ -296,9 +306,54 @@ class StashOrganizer:
                 print(f"  {cat}: {cats[cat]}")
             print()
 
+    def _find_target_tab(self, category: str) -> int:
+        """Find the configured target tab for a category."""
+        for tab, cfg in self.layout.items():
+            if tab == 0:
+                continue
+            if category in cfg.get("categories", []):
+                return tab
+        return 9  # overflow
+
+    def _compute_keep_in_place(self) -> Dict[int, set]:
+        """Determine which tabs already have enough matching items to keep.
+
+        If >= KEEP_IN_PLACE_THRESHOLD of a tab's items belong to that tab's
+        configured categories, mark those items as 'already home' and skip them.
+        This prevents pointlessly moving 100 rings from tab 3 to tab 3.
+        """
+        keep_tabs = {}  # tab -> set of categories that should stay
+
+        for tab, cfg in self.layout.items():
+            if tab == 0 or not cfg.get("categories"):
+                continue
+
+            tab_items = [i for i in self.all_items if i["_tab"] == tab]
+            if not tab_items:
+                continue
+
+            # Count items that BELONG on this tab vs items that should go elsewhere
+            matching = sum(1 for i in tab_items if i["_category"] in cfg["categories"])
+            ratio = matching / len(tab_items) if tab_items else 0
+
+            if ratio >= KEEP_IN_PLACE_THRESHOLD:
+                keep_tabs[tab] = set(cfg["categories"])
+
+        return keep_tabs
+
     def plan_reorganization(self):
-        """Plan item movements based on layout configuration."""
+        """Plan item movements with keep-in-place optimization.
+
+        Strategy D+B:
+        - (B) Categories are sub-split across dedicated tabs in the layout
+        - (D) If a tab already has 50%+ matching items, those items stay put
+              Only items on the WRONG tab get moved
+        """
+        # Find which tabs are "already home" for their categories
+        keep = self._compute_keep_in_place()
+
         moves = []
+        kept_count = 0
 
         # Skip tab 0 (personal)
         moveable = [i for i in self.all_items if i["_tab"] != 0]
@@ -306,17 +361,13 @@ class StashOrganizer:
         for item in moveable:
             cat = item["_category"]
             current_tab = item["_tab"]
+            target_tab = self._find_target_tab(cat)
 
-            # Find target tab for this category
-            target_tab = None
-            for tab, cfg in self.layout.items():
-                if tab == 0:
-                    continue
-                if cat in cfg.get("categories", []):
-                    target_tab = tab
-                    break
-            if target_tab is None:
-                target_tab = 9  # overflow
+            # Keep-in-place check: if this item's category belongs on its
+            # current tab AND that tab passes the threshold, skip it
+            if current_tab in keep and cat in keep[current_tab]:
+                kept_count += 1
+                continue
 
             if target_tab != current_tab:
                 moves.append({
@@ -329,8 +380,20 @@ class StashOrganizer:
                     "size_y": item.get("size_y", 1),
                 })
 
-        # Sort moves to minimize tab switches: group by (from_tab, to_tab)
-        moves.sort(key=lambda m: (m["from_tab"], m["to_tab"]))
+        # Sort moves strategically:
+        # 1. First move items OUT of tabs that need to receive items (free up space)
+        # 2. Then move items INTO those tabs
+        # This avoids circular dependencies where Tab A needs Tab B's space and vice versa
+        receiving_tabs = set(m["to_tab"] for m in moves)
+        def move_priority(m):
+            # Items leaving a receiving tab get priority (frees space for incoming)
+            is_clearing = 1 if m["from_tab"] in receiving_tabs else 0
+            return (-is_clearing, m["from_tab"], m["to_tab"])
+        moves.sort(key=move_priority)
+
+        if kept_count > 0:
+            print(f"  (Keeping {kept_count} items in place — already on correct tab)")
+
         return moves
 
     def show_plan(self, moves):
@@ -417,23 +480,30 @@ class StashOrganizer:
             cursor_pre = self.mcp.call("get_cursor_item")
             if cursor_pre.get("has_item"):
                 cuid = cursor_pre.get("unit_id", 0)
-                # Find a free inventory cell
-                inv_grid = self.mcp.call("get_stash_grid", {"container": "inventory"})
-                placed = False
-                for cy, row in enumerate(inv_grid.get("grid", [])):
-                    for cx, cell in enumerate(row):
-                        if cell == 0:
-                            self.mcp.call("cursor_to_container", {
-                                "item_id": cuid, "x": cx, "y": cy,
-                                "container": "inventory",
-                            })
-                            time.sleep(0.3)
-                            placed = True
+                cleared = False
+                # Try each container until item is placed
+                for container in ["stash", "inventory"]:
+                    grid_data = self.mcp.call("get_stash_grid", {"container": container})
+                    grid = grid_data.get("grid", [])
+                    gh = len(grid)
+                    gw = len(grid[0]) if grid else 0
+                    for cy in range(gh):
+                        for cx in range(gw):
+                            if grid[cy][cx] == 0:
+                                res = self.mcp.call("cursor_to_container", {
+                                    "item_id": cuid, "x": cx, "y": cy,
+                                    "container": container,
+                                })
+                                time.sleep(0.3)
+                                check = self.mcp.call("get_cursor_item")
+                                if not check.get("has_item"):
+                                    cleared = True
+                                    break
+                        if cleared:
                             break
-                    if placed:
+                    if cleared:
                         break
-                cursor_re = self.mcp.call("get_cursor_item")
-                if cursor_re.get("has_item"):
+                if not cleared:
                     print(f"  [{i+1}/{len(moves)}] SKIP {m['name']}: cursor occupied (can't clear)")
                     skipped += 1
                     continue
