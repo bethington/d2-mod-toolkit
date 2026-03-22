@@ -724,7 +724,26 @@ namespace {
                             ImGui::Text("%d", u.distance);
 
                             ImGui::TableNextColumn();
-                            ImGui::Text("(%d,%d)", u.x, u.y);
+                            // Show immunities for monsters
+                            if (u.type == 1) {
+                                bool first = true;
+                                auto showImm = [&](int res, const char* label, ImVec4 color) {
+                                    if (res >= 100) {
+                                        if (!first) ImGui::SameLine(0, 2);
+                                        ImGui::TextColored(color, "%s", label);
+                                        first = false;
+                                    }
+                                };
+                                showImm(u.fireRes, "Fi", ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
+                                showImm(u.coldRes, "Co", ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
+                                showImm(u.lightRes, "Li", ImVec4(1.0f, 1.0f, 0.3f, 1.0f));
+                                showImm(u.poisonRes, "Po", ImVec4(0.3f, 1.0f, 0.3f, 1.0f));
+                                showImm(u.physRes, "Ph", ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+                                showImm(u.magicRes, "Ma", ImVec4(0.8f, 0.5f, 1.0f, 1.0f));
+                                if (first) ImGui::Text("(%d,%d)", u.x, u.y);
+                            } else {
+                                ImGui::Text("(%d,%d)", u.x, u.y);
+                            }
                         }
                         ImGui::EndTable();
                     }

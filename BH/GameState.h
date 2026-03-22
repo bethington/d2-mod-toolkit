@@ -142,6 +142,13 @@ namespace GameState {
         bool isBoss = false;
         bool isChampion = false;
         bool isMinion = false;
+        // Monster resistances (raw values, immune if >= 100)
+        int fireRes = 0;
+        int coldRes = 0;
+        int lightRes = 0;
+        int poisonRes = 0;
+        int physRes = 0;
+        int magicRes = 0;
     };
 
     // Update game state snapshot (call from game thread)

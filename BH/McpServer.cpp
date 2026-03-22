@@ -1203,6 +1203,22 @@ namespace {
                     uj["is_champion"] = u.isChampion;
                     uj["is_minion"] = u.isMinion;
                     uj["dead"] = (u.mode == 0 || u.mode == 12);
+
+                    // Immunities (resist >= 100)
+                    json immunities = json::array();
+                    if (u.fireRes >= 100) immunities.push_back("fire");
+                    if (u.coldRes >= 100) immunities.push_back("cold");
+                    if (u.lightRes >= 100) immunities.push_back("lightning");
+                    if (u.poisonRes >= 100) immunities.push_back("poison");
+                    if (u.physRes >= 100) immunities.push_back("physical");
+                    if (u.magicRes >= 100) immunities.push_back("magic");
+                    if (!immunities.empty()) uj["immunities"] = immunities;
+
+                    uj["resistances"] = {
+                        {"fire", u.fireRes}, {"cold", u.coldRes},
+                        {"lightning", u.lightRes}, {"poison", u.poisonRes},
+                        {"physical", u.physRes}, {"magic", u.magicRes}
+                    };
                 }
 
                 if (u.type == 0) { // Player

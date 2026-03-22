@@ -482,6 +482,15 @@ namespace {
                         nu.isChampion = (flags & 2) != 0;
                         nu.isMinion = (flags & 4) != 0;
                     }
+
+                    // Read monster resistances for immunity detection
+                    nu.fireRes = D2COMMON_GetUnitStat(pUnit, STAT_FIRERESIST, 0);
+                    nu.coldRes = D2COMMON_GetUnitStat(pUnit, STAT_COLDRESIST, 0);
+                    nu.lightRes = D2COMMON_GetUnitStat(pUnit, STAT_LIGHTNINGRESIST, 0);
+                    nu.poisonRes = D2COMMON_GetUnitStat(pUnit, STAT_POISONRESIST, 0);
+                    nu.physRes = D2COMMON_GetUnitStat(pUnit, STAT_DMGREDUCTIONPCT, 0);
+                    nu.magicRes = D2COMMON_GetUnitStat(pUnit, STAT_MAGICDMGREDUCTIONPCT, 0);
+
                     // Fallback if name lookup failed
                     if (!nu.name[0]) snprintf(nu.name, sizeof(nu.name), "Monster#%d", pUnit->dwTxtFileNo);
                 } else if (pUnit->dwType == 0) { // Player
