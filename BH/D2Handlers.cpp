@@ -7,6 +7,7 @@
 #include "GameNav.h"
 #include "GamePause.h"
 #include "MemWatch.h"
+#include "McpServer.h"
 
 #include <iterator>
 
@@ -52,6 +53,17 @@ DWORD WINAPI GameThread(VOID* lpvoid) {
 		}
 		GameNav::Update();
 		GameNav::CheckPendingExit();
+
+		// Auto-restart MCP server if it died
+		if (!McpServer::IsRunning()) {
+			static DWORD lastRestart = 0;
+			DWORD now = GetTickCount();
+			if (now - lastRestart > 3000) { // don't spam restarts
+				lastRestart = now;
+				McpServer::Init(App.debugPanel.mcpPort.value);
+			}
+		}
+
 		Sleep(10);
 	}
 }
