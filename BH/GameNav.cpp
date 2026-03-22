@@ -275,31 +275,20 @@ namespace GameNav {
 
             case OOG_DIALOG: {
                 g_status.currentScreen = "Dialog";
-                g_status.message = "Dismissing dialog...";
-                // Strategy: send keyboard input to dismiss dialogs
-                // ESC closes most dialogs, ENTER confirms them
-                HWND hWnd = FindWindow(nullptr, "Diablo II");
-                if (hWnd) {
-                    if (g_retryCount % 2 == 0) {
-                        // Try ENTER to confirm
-                        PostMessage(hWnd, WM_KEYDOWN, VK_RETURN, 0);
-                        PostMessage(hWnd, WM_KEYUP, VK_RETURN, 0);
-                    } else {
-                        // Try ESC to cancel
-                        PostMessage(hWnd, WM_KEYDOWN, VK_ESCAPE, 0);
-                        PostMessage(hWnd, WM_KEYUP, VK_ESCAPE, 0);
-                    }
-                }
-                // Also try clicking buttons via OnPress as backup
+                g_status.message = "Dialog detected — clicking buttons...";
+                // Click each button with OnPress, trying all of them
                 Control* p = *p_D2WIN_FirstControl;
                 while (p) {
                     if (p->dwType == CTRL_TYPE_BUTTON && p->OnPress) {
                         ClickControl(p);
-                        break;
                     }
                     p = p->pNext;
                 }
                 g_retryCount++;
+                if (g_retryCount > 30) {
+                    g_status.state = NAV_FAILED;
+                    g_status.message = "Failed: stuck on dialog";
+                }
                 return;
             }
 
