@@ -1782,7 +1782,12 @@ namespace {
                 for (auto& a : arguments["args"]) {
                     if (argCount >= 8) break;
                     if (a.is_string()) {
-                        args[argCount] = (DWORD)strtoul(a.get<std::string>().c_str(), nullptr, 16);
+                        // Auto-detect: "0x..." = hex, otherwise decimal
+                        std::string sv = a.get<std::string>();
+                        if (sv.size() > 2 && sv[0] == '0' && (sv[1] == 'x' || sv[1] == 'X'))
+                            args[argCount] = (DWORD)strtoul(sv.c_str(), nullptr, 16);
+                        else
+                            args[argCount] = (DWORD)strtoul(sv.c_str(), nullptr, 10);
                     } else {
                         args[argCount] = a.get<DWORD>();
                     }
