@@ -12,6 +12,9 @@
 
 #include <windows.h>
 #include <shellscalingapi.h>
+#include <map>
+#include <vector>
+#include <string>
 #include <d3d9.h>
 #include <thread>
 #include <atomic>
@@ -33,6 +36,51 @@ namespace {
 
     static const char* WINDOW_CLASS = "D2ModToolkitDebugPanel";
     static const char* WINDOW_TITLE = "d2-mod-toolkit Debug Panel";
+
+    // Stash tab scan cache
+    struct StashItem {
+        int unitId;
+        int code;
+        int gridX, gridY;
+        int tab;
+        char name[64];
+        char category[32];
+    };
+    static std::vector<StashItem> g_stashScanItems;
+    static int g_stashScanTab = -1; // -1 = no scan, 0-9 = single tab, 10 = all
+    static bool g_stashScanning = false;
+    static int g_stashScanProgress = 0;
+
+    const char* CategorizeItemName(const char* name) {
+        // Simplified categorization for display
+        if (strstr(name, "Grand Charm")) return "Grand Charm";
+        if (strstr(name, "Large Charm")) return "Large Charm";
+        if (strstr(name, "Small Charm")) return "Small Charm";
+        if (strstr(name, "Charm")) return "Charm";
+        if (strstr(name, "Ring")) return "Ring";
+        if (strstr(name, "Amulet")) return "Amulet";
+        if (strstr(name, "Jewel")) return "Jewel";
+        if (strstr(name, "Token")) return "Token";
+        if (strstr(name, "Potion")) return "Potion";
+        if (strstr(name, "Key")) return "Key";
+        if (strstr(name, "Tome")) return "Tome";
+        if (strstr(name, "Scroll")) return "Scroll";
+        if (strstr(name, "Ear")) return "Ear";
+        if (strstr(name, "Boot") || strstr(name, "Greave")) return "Boots";
+        if (strstr(name, "Glove") || strstr(name, "Gaunt")) return "Gloves";
+        if (strstr(name, "Belt") || strstr(name, "Sash")) return "Belt";
+        if (strstr(name, "Armor") || strstr(name, "Plate") || strstr(name, "Mail") || strstr(name, "Sacred")) return "Body Armor";
+        if (strstr(name, "Helm") || strstr(name, "Crown") || strstr(name, "Mask") || strstr(name, "Visage") || strstr(name, "Diadem")) return "Helmet";
+        if (strstr(name, "Shield") || strstr(name, "Pavise") || strstr(name, "Monarch")) return "Shield";
+        if (strstr(name, "Sword") || strstr(name, "Blade") || strstr(name, "Crystal")) return "Sword";
+        if (strstr(name, "Axe") || strstr(name, "Hatchet")) return "Axe";
+        if (strstr(name, "Spear") || strstr(name, "Javelin") || strstr(name, "Pilum") || strstr(name, "Mancatcher")) return "Spear/Jav";
+        if (strstr(name, "Staff") || strstr(name, "Wand") || strstr(name, "Orb") || strstr(name, "Scepter")) return "Caster Wpn";
+        if (strstr(name, "Bow") || strstr(name, "Crossbow")) return "Ranged";
+        if (strstr(name, "Claw") || strstr(name, "Katar")) return "Claw";
+        if (strstr(name, "Mace") || strstr(name, "Club") || strstr(name, "Hammer") || strstr(name, "Flail")) return "Mace";
+        return "Other";
+    }
 
     // Base sizes at 96 DPI (100% scaling)
     static const float BASE_FONT_SIZE = 24.0f;
@@ -970,6 +1018,124 @@ namespace {
                     ImGui::TextColored(cGold5, "GFX Screen Size:"); ImGui::SameLine();
                     ImGui::Text("%d", gfxScreenSize);
                 }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Stash")) {
+                ImVec4 cGold6(0.85f, 0.72f, 0.45f, 1.0f);
+                ImVec4 cGray6(0.6f, 0.6f, 0.6f, 1.0f);
+                ImVec4 cGreen6(0.4f, 1.0f, 0.4f, 1.0f);
+
+                // Read current tab index from PlayerData+0x1B4
+                int currentTab = -1;
+                if (GameState::IsGameReady()) {
+                    try {
+                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                        if (pPlayer && pPlayer->pPlayerData) {
+                            // PlayerData is at pPlayer+0x14, tab at +0x1B4
+                            DWORD pdataAddr = (DWORD)pPlayer->pPlayerData;
+                            if (pdataAddr > 0x10000) {
+                                currentTab = *(int*)(pdataAddr + 0x1B4);
+                            }
+                        }
+                    } catch (...) {}
+                }
+
+                // Tab selector buttons
+                const char* tabLabels[] = {"P", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
+                for (int t = 0; t < 10; t++) {
+                    if (t > 0) ImGui::SameLine();
+                    bool isActive = (currentTab == t);
+                    if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+                    if (ImGui::SmallButton(tabLabels[t])) {
+                        // Click the stash tab
+                        McpServer::GetRequestCount(); // just to verify MCP is up
+                        // Switch tab via click_screen would need game thread
+                        // For now just record which tab to view
+                        g_stashScanTab = t;
+                        g_stashScanItems.clear();
+
+                        // Read current tab items
+                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                        if (pPlayer && pPlayer->pInventory) {
+                            UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
+                            while (pItem) {
+                                if (pItem->pItemData && pItem->pItemData->ItemLocation == 4) { // STORAGE_STASH
+                                    StashItem si = {};
+                                    si.unitId = pItem->dwUnitId;
+                                    si.code = pItem->dwTxtFileNo;
+                                    si.tab = currentTab;
+                                    if (pItem->pPath) {
+                                        ItemPath* ip = (ItemPath*)pItem->pPath;
+                                        si.gridX = (int)ip->dwPosX;
+                                        si.gridY = (int)ip->dwPosY;
+                                    }
+                                    char itemName[64] = {};
+                                    try {
+                                        wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+                                        if (wName) WideCharToMultiByte(CP_UTF8, 0, wName, -1, itemName, sizeof(itemName)-1, nullptr, nullptr);
+                                    } catch (...) {}
+                                    strncpy_s(si.name, itemName[0] ? itemName : "?", sizeof(si.name));
+                                    strncpy_s(si.category, CategorizeItemName(si.name), sizeof(si.category));
+                                    g_stashScanItems.push_back(si);
+                                }
+                                pItem = D2COMMON_GetNextItemFromInventory(pItem);
+                            }
+                        }
+                    }
+                    if (isActive) ImGui::PopStyleColor();
+                }
+
+                ImGui::SameLine();
+                ImGui::TextColored(cGold6, " Tab: %d", currentTab);
+                ImGui::SameLine();
+                ImGui::TextColored(cGray6, "(%d items cached)", (int)g_stashScanItems.size());
+
+                ImGui::Separator();
+
+                // Display items grouped by category
+                if (!g_stashScanItems.empty()) {
+                    // Build category groups
+                    std::map<std::string, std::vector<const StashItem*>> groups;
+                    for (auto& si : g_stashScanItems) {
+                        groups[si.category].push_back(&si);
+                    }
+
+                    if (ImGui::BeginTable("StashItems", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                        ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("Pos", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
+                        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 40 * g_dpiScale);
+                        ImGui::TableHeadersRow();
+
+                        for (auto& kv : groups) {
+                            // Category header row
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::TextColored(cGold6, "%s (%d)", kv.first.c_str(), (int)kv.second.size());
+                            ImGui::TableNextColumn();
+                            ImGui::TableNextColumn();
+                            ImGui::TableNextColumn();
+
+                            // Items in category
+                            for (auto* si : kv.second) {
+                                ImGui::TableNextRow();
+                                ImGui::TableNextColumn();
+                                ImGui::TextColored(cGray6, "  ");
+                                ImGui::TableNextColumn();
+                                ImGui::Text("%s", si->name);
+                                ImGui::TableNextColumn();
+                                ImGui::Text("(%d,%d)", si->gridX, si->gridY);
+                                ImGui::TableNextColumn();
+                                ImGui::Text("%d", si->unitId);
+                            }
+                        }
+                        ImGui::EndTable();
+                    }
+                } else {
+                    ImGui::TextColored(cGray6, "Click a tab button above to load items.");
+                    ImGui::TextColored(cGray6, "Stash must be open in-game.");
+                }
+
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
