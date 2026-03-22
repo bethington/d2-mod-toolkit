@@ -509,6 +509,20 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "call_function"},
+            {"description", "Call a game function by address with up to 8 arguments. Returns EAX. Supports __stdcall (default), __cdecl, and __fastcall conventions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"address", {{"type", "string"}, {"description", "Hex address of function to call"}}},
+                    {"args", {{"type", "array"}, {"description", "Array of DWORD arguments (hex strings or integers)"}}},
+                    {"convention", {{"type", "string"}, {"description", "'stdcall' (default), 'cdecl', or 'fastcall'"}}}
+                }},
+                {"required", json::array({"address"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "read_memory"},
             {"description", "Read bytes from a memory address in the game process. Returns hex dump and interpreted values."},
             {"inputSchema", {
@@ -1634,6 +1648,113 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
+        }
+
+        if (name == "call_function") {
+            std::string addrStr = arguments.value("address", "");
+            std::string convention = arguments.value("convention", "stdcall");
+            DWORD funcAddr = (DWORD)strtoul(addrStr.c_str(), nullptr, 16);
+
+            if (funcAddr == 0) {
+                return {{"content", {{{"type", "text"}, {"text", "Invalid function address"}}}}, {"isError", true}};
+            }
+
+            // Parse arguments
+            DWORD args[8] = {};
+            int argCount = 0;
+            if (arguments.contains("args") && arguments["args"].is_array()) {
+                for (auto& a : arguments["args"]) {
+                    if (argCount >= 8) break;
+                    if (a.is_string()) {
+                        args[argCount] = (DWORD)strtoul(a.get<std::string>().c_str(), nullptr, 16);
+                    } else {
+                        args[argCount] = a.get<DWORD>();
+                    }
+                    argCount++;
+                }
+            }
+
+            // Call the function with SEH protection
+            DWORD result = 0;
+            bool success = false;
+
+            // Use SafeCallFunction helper (defined with __try)
+            struct CallParams {
+                DWORD addr; DWORD args[8]; int argc; std::string conv;
+                DWORD retval; bool ok;
+            };
+            // Can't use __try with C++ objects, so use a static helper
+            static auto DoCall = [](DWORD addr, DWORD* pArgs, int argc, const char* conv) -> DWORD {
+                typedef DWORD (__stdcall *StdcallFunc0)();
+                typedef DWORD (__stdcall *StdcallFunc1)(DWORD);
+                typedef DWORD (__stdcall *StdcallFunc2)(DWORD, DWORD);
+                typedef DWORD (__stdcall *StdcallFunc3)(DWORD, DWORD, DWORD);
+                typedef DWORD (__stdcall *StdcallFunc4)(DWORD, DWORD, DWORD, DWORD);
+                typedef DWORD (__cdecl *CdeclFunc0)();
+                typedef DWORD (__cdecl *CdeclFunc1)(DWORD);
+                typedef DWORD (__cdecl *CdeclFunc2)(DWORD, DWORD);
+                typedef DWORD (__cdecl *CdeclFunc3)(DWORD, DWORD, DWORD);
+                typedef DWORD (__fastcall *FastFunc0)();
+                typedef DWORD (__fastcall *FastFunc1)(DWORD);
+                typedef DWORD (__fastcall *FastFunc2)(DWORD, DWORD);
+                typedef DWORD (__fastcall *FastFunc3)(DWORD, DWORD, DWORD);
+
+                if (strcmp(conv, "fastcall") == 0) {
+                    switch (argc) {
+                        case 0: return ((FastFunc0)addr)();
+                        case 1: return ((FastFunc1)addr)(pArgs[0]);
+                        case 2: return ((FastFunc2)addr)(pArgs[0], pArgs[1]);
+                        case 3: return ((FastFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
+                        default: return ((FastFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
+                    }
+                } else if (strcmp(conv, "cdecl") == 0) {
+                    switch (argc) {
+                        case 0: return ((CdeclFunc0)addr)();
+                        case 1: return ((CdeclFunc1)addr)(pArgs[0]);
+                        case 2: return ((CdeclFunc2)addr)(pArgs[0], pArgs[1]);
+                        case 3: return ((CdeclFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
+                        default: return ((CdeclFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
+                    }
+                } else { // stdcall
+                    switch (argc) {
+                        case 0: return ((StdcallFunc0)addr)();
+                        case 1: return ((StdcallFunc1)addr)(pArgs[0]);
+                        case 2: return ((StdcallFunc2)addr)(pArgs[0], pArgs[1]);
+                        case 3: return ((StdcallFunc3)addr)(pArgs[0], pArgs[1], pArgs[2]);
+                        case 4: return ((StdcallFunc4)addr)(pArgs[0], pArgs[1], pArgs[2], pArgs[3]);
+                        default: return ((StdcallFunc4)addr)(pArgs[0], pArgs[1], pArgs[2], pArgs[3]);
+                    }
+                }
+            };
+
+            // Wrap in SEH via our SafeMemRead pattern — but we can't use __try here
+            // Use _set_se_translator that we set on this thread
+            try {
+                result = DoCall(funcAddr, args, argCount, convention.c_str());
+                success = true;
+            } catch (...) {
+                success = false;
+            }
+
+            if (!success) {
+                return {{"content", {{{"type", "text"}, {"text", "Function call crashed at " + addrStr}}}}, {"isError", true}};
+            }
+
+            char retBuf[16]; snprintf(retBuf, sizeof(retBuf), "0x%08X", result);
+            json argList = json::array();
+            for (int i = 0; i < argCount; i++) {
+                char ab[16]; snprintf(ab, sizeof(ab), "0x%08X", args[i]);
+                argList.push_back(std::string(ab));
+            }
+
+            json info = {
+                {"address", addrStr},
+                {"convention", convention},
+                {"args", argList},
+                {"return_value", retBuf},
+                {"return_decimal", (int)result}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "read_memory") {
