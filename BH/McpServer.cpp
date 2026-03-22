@@ -175,6 +175,21 @@ namespace {
         return (DWORD)proc;
     }
 
+    static bool SafeGetItemSize(DWORD txtFileNo, int* pW, int* pH) {
+        __try {
+            ItemsTxt* txt = D2COMMON_GetItemText(txtFileNo);
+            if (txt) {
+                *pW = txt->binvwidth;
+                *pH = txt->binvheight;
+                if (*pW < 1) *pW = 1;
+                if (*pH < 1) *pH = 1;
+                return true;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        *pW = 1; *pH = 1;
+        return false;
+    }
+
     static bool SafeMemWrite(DWORD addr, const void* src, size_t size) {
         __try {
             memcpy((void*)addr, src, size);
@@ -1928,13 +1943,7 @@ namespace {
 
                     // Get item size
                     int w = 1, h = 1;
-                    ItemsTxt* txt = D2COMMON_GetItemText(pItem->dwTxtFileNo);
-                    if (txt) {
-                        w = txt->binvwidth;
-                        h = txt->binvheight;
-                        if (w < 1) w = 1;
-                        if (h < 1) h = 1;
-                    }
+                    SafeGetItemSize(pItem->dwTxtFileNo, &w, &h);
 
                     // Mark occupied cells
                     for (int iy = y; iy < y + h && iy < gridH; iy++) {
