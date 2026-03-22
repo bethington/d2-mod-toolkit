@@ -187,34 +187,39 @@ class Container:
 
 # ---- Tab Layout Configuration ----
 
+# Layout based on actual item census (543 items, 2026-03-22):
+#   Charms: 168 (split across 2 tabs), Jewels: 107, Rings: 63,
+#   Body Armor: 25, Amulets: 25, Belts: 17, Boots: 16, Helmets: 15,
+#   Weapons: 22, Tokens/PD2: 25, Other: 42
 DEFAULT_LAYOUT = {
-    0: {"name": "Personal", "categories": []},  # Don't touch personal
-    1: {"name": "Charms", "categories": [
+    0: {"name": "Personal", "categories": []},       # Don't touch
+    1: {"name": "Charms (1/2)", "categories": [       # ~76 charms already here
         "Grand Charm", "Large Charm", "Small Charm", "Charm"
     ]},
-    2: {"name": "Jewels & Gems", "categories": [
+    2: {"name": "Jewels & Gems", "categories": [      # 107 jewels already here
         "Jewel", "Gem", "Rune"
     ]},
-    3: {"name": "Rings & Amulets", "categories": [
+    3: {"name": "Rings & Amulets", "categories": [    # 63+25 = 88 already here
         "Ring", "Amulet"
     ]},
-    4: {"name": "Armor & Belts", "categories": [
-        "Body Armor", "Belt"
+    4: {"name": "Charms (2/2)", "categories": [       # ~79 charms already here
+        "Grand Charm", "Large Charm", "Small Charm", "Charm"
     ]},
-    5: {"name": "Gloves, Boots, Helmets", "categories": [
-        "Gloves", "Boots", "Helmet", "Shield"
+    5: {"name": "Body Armor", "categories": [         # 25 armors (~150 cells)
+        "Body Armor"
     ]},
-    6: {"name": "Melee Weapons", "categories": [
-        "Sword", "Axe", "Mace", "Assassin Claw",
-        "Spear/Javelin", "Polearm"
+    6: {"name": "Boots, Gloves, Belts", "categories": [ # 16+11+17 = 44 items
+        "Boots", "Gloves", "Belt"
     ]},
-    7: {"name": "Caster & Ranged", "categories": [
+    7: {"name": "Helmets, Shields, Weapons", "categories": [ # 15+6+22 = 43 items
+        "Helmet", "Shield", "Sword", "Axe", "Mace",
+        "Assassin Claw", "Spear/Javelin", "Polearm",
         "Caster Weapon", "Ranged Weapon"
     ]},
-    8: {"name": "PD2 Special & Tokens", "categories": [
+    8: {"name": "PD2 Special & Tokens", "categories": [ # 25 items
         "Token", "PD2 Special", "Key", "Quest"
     ]},
-    9: {"name": "Overflow & Misc", "categories": [
+    9: {"name": "Overflow & Misc", "categories": [     # 42+ items
         "Potion", "Scroll/Tome", "Ear", "Other"
     ]},
 }
@@ -306,14 +311,40 @@ class StashOrganizer:
                 print(f"  {cat}: {cats[cat]}")
             print()
 
-    def _find_target_tab(self, category: str) -> int:
-        """Find the configured target tab for a category."""
+    def _find_target_tab(self, category: str, current_tab: int = -1) -> int:
+        """Find the best target tab for a category.
+
+        If multiple tabs accept this category (e.g. charms on tabs 1+4),
+        prefer the one with the most free space. If the item is already
+        on one of the valid tabs, keep it there.
+        """
+        candidates = []
         for tab, cfg in self.layout.items():
             if tab == 0:
                 continue
             if category in cfg.get("categories", []):
-                return tab
-        return 9  # overflow
+                candidates.append(tab)
+
+        if not candidates:
+            return 9  # overflow
+
+        # If already on a valid tab, stay there
+        if current_tab in candidates:
+            return current_tab
+
+        # Pick the candidate with the most free space
+        if len(candidates) == 1:
+            return candidates[0]
+
+        best_tab = candidates[0]
+        best_free = -1
+        for tab in candidates:
+            if tab in self.tabs:
+                free = self.tabs[tab].free_cells()
+                if free > best_free:
+                    best_free = free
+                    best_tab = tab
+        return best_tab
 
     def _compute_keep_in_place(self) -> Dict[int, set]:
         """Determine which tabs already have enough matching items to keep.
@@ -361,7 +392,7 @@ class StashOrganizer:
         for item in moveable:
             cat = item["_category"]
             current_tab = item["_tab"]
-            target_tab = self._find_target_tab(cat)
+            target_tab = self._find_target_tab(cat, current_tab)
 
             # Keep-in-place check: if this item's category belongs on its
             # current tab AND that tab passes the threshold, skip it
@@ -425,8 +456,79 @@ class StashOrganizer:
             free = self.tabs[tab].free_cells() if tab in self.tabs else 160
             print(f"  Tab {tab}: {current} now, +{incoming} in, -{outgoing} out -> ~{final} items ({free} free cells)")
 
+    def _clear_cursor(self) -> bool:
+        """Ensure cursor is empty. Returns True if cursor is clear."""
+        cursor = self.mcp.call("get_cursor_item")
+        if not cursor.get("has_item"):
+            return True
+        cuid = cursor.get("unit_id", 0)
+        for container in ["stash", "inventory"]:
+            grid_data = self.mcp.call("get_stash_grid", {"container": container})
+            grid = grid_data.get("grid", [])
+            gh, gw = len(grid), (len(grid[0]) if grid else 0)
+            for cy in range(gh):
+                for cx in range(gw):
+                    if grid[cy][cx] == 0:
+                        self.mcp.call("cursor_to_container", {
+                            "item_id": cuid, "x": cx, "y": cy,
+                            "container": container,
+                        })
+                        time.sleep(0.3)
+                        if not self.mcp.call("get_cursor_item").get("has_item"):
+                            return True
+        return False
+
+    def _execute_single_move(self, m, dest_grids, idx, total) -> str:
+        """Execute a single move. Returns 'ok', 'skip', or 'fail'."""
+        item = m["item"]
+        uid = item["unit_id"]
+        from_tab, to_tab = m["from_tab"], m["to_tab"]
+        sx, sy = m["size_x"], m["size_y"]
+
+        dest = dest_grids.get(to_tab)
+        if not dest:
+            dest = Container(name=f"Tab {to_tab}", width=10, height=16, tab=to_tab)
+            dest_grids[to_tab] = dest
+
+        spot = dest.find_spot(sx, sy)
+        if not spot:
+            print(f"  [{idx}/{total}] SKIP {m['name']}: no space in tab {to_tab}")
+            return "skip"
+
+        if not self._clear_cursor():
+            print(f"  [{idx}/{total}] SKIP {m['name']}: cursor stuck")
+            return "skip"
+
+        dest_x, dest_y = spot
+        print(f"  [{idx}/{total}] {m['name']} (tab {from_tab} -> tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
+
+        result = self.mcp.call("move_item", {
+            "item_id": uid, "dest_container": "stash",
+            "dest_x": dest_x, "dest_y": dest_y, "dest_tab": to_tab,
+        }, timeout=20)
+
+        status = result.get("status", "unknown")
+        if status == "moved":
+            print("OK")
+            if from_tab in dest_grids:
+                dest_grids[from_tab].unmark(item)
+            dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+            return "ok"
+        elif status == "swapped":
+            swap = result.get("swapped_item", {})
+            print(f"SWAP ({swap.get('name', '?')})")
+            if from_tab in dest_grids:
+                dest_grids[from_tab].unmark(item)
+            dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+            self._clear_cursor()
+            return "ok"
+        else:
+            print(f"FAIL ({status})")
+            self._clear_cursor()
+            return "fail"
+
     def execute_moves(self, moves, dry_run=False, max_moves=None):
-        """Execute moves using move_item MCP tool with batched tab switching."""
+        """Two-pass execution: clear space first, then place items."""
         if dry_run:
             self.show_plan(moves)
             print("\n[DRY RUN] No items moved.")
@@ -437,163 +539,44 @@ class StashOrganizer:
             return
 
         self.show_plan(moves)
-        print(f"\n=== EXECUTING {len(moves)} MOVES ===\n")
 
-        # Pre-compute target positions for each destination tab
-        dest_grids = {}  # tab -> Container (virtual grid for placement planning)
+        # Split into two passes:
+        # Pass 1: Items leaving a tab that needs to RECEIVE items (frees space)
+        # Pass 2: Everything else
+        receiving_tabs = set(m["to_tab"] for m in moves)
+        pass1 = [m for m in moves if m["from_tab"] in receiving_tabs]
+        pass2 = [m for m in moves if m["from_tab"] not in receiving_tabs]
+
+        all_ordered = pass1 + pass2
+        total = len(all_ordered)
+
+        print(f"\n=== EXECUTING {total} MOVES (pass1: {len(pass1)} clearing, pass2: {len(pass2)} placing) ===\n")
+
+        dest_grids = {}
         for tab in self.tabs:
             dest_grids[tab] = Container(
                 name=f"Plan {tab}", width=10, height=16, tab=tab,
-                grid=[row[:] for row in self.tabs[tab].grid]  # deep copy
+                grid=[row[:] for row in self.tabs[tab].grid]
             )
 
         success = 0
         failed = 0
         skipped = 0
+        move_count = 0
 
-        for i, m in enumerate(moves):
-            if max_moves and i >= max_moves:
-                print(f"\nStopped after {max_moves} moves (limit reached)")
+        for i, m in enumerate(all_ordered):
+            if max_moves and move_count >= max_moves:
+                print(f"\nStopped after {max_moves} attempted moves")
                 break
 
-            item = m["item"]
-            uid = item["unit_id"]
-            from_tab = m["from_tab"]
-            to_tab = m["to_tab"]
-            sx, sy = m["size_x"], m["size_y"]
-
-            # Find a free spot in the destination grid
-            dest = dest_grids.get(to_tab)
-            if not dest:
-                dest = Container(name=f"Tab {to_tab}", width=10, height=16, tab=to_tab)
-                dest_grids[to_tab] = dest
-
-            spot = dest.find_spot(sx, sy)
-            if not spot:
-                print(f"  [{i+1}/{len(moves)}] SKIP {m['name']}: no space in tab {to_tab}")
-                skipped += 1
-                continue
-
-            dest_x, dest_y = spot
-
-            # Pre-check: ensure cursor is empty
-            cursor_pre = self.mcp.call("get_cursor_item")
-            if cursor_pre.get("has_item"):
-                cuid = cursor_pre.get("unit_id", 0)
-                cleared = False
-                # Try each container until item is placed
-                for container in ["stash", "inventory"]:
-                    grid_data = self.mcp.call("get_stash_grid", {"container": container})
-                    grid = grid_data.get("grid", [])
-                    gh = len(grid)
-                    gw = len(grid[0]) if grid else 0
-                    for cy in range(gh):
-                        for cx in range(gw):
-                            if grid[cy][cx] == 0:
-                                res = self.mcp.call("cursor_to_container", {
-                                    "item_id": cuid, "x": cx, "y": cy,
-                                    "container": container,
-                                })
-                                time.sleep(0.3)
-                                check = self.mcp.call("get_cursor_item")
-                                if not check.get("has_item"):
-                                    cleared = True
-                                    break
-                        if cleared:
-                            break
-                    if cleared:
-                        break
-                if not cleared:
-                    print(f"  [{i+1}/{len(moves)}] SKIP {m['name']}: cursor occupied (can't clear)")
-                    skipped += 1
-                    continue
-
-            print(f"  [{i+1}/{len(moves)}] {m['name']} (tab {from_tab} -> tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
-
-            # Use move_item for atomic pick+switch+place
-            result = self.mcp.call("move_item", {
-                "item_id": uid,
-                "dest_container": "stash",
-                "dest_x": dest_x,
-                "dest_y": dest_y,
-                "dest_tab": to_tab,
-            }, timeout=20)
-
-            status = result.get("status", "unknown")
-            if status == "moved":
-                print("OK")
+            move_count += 1
+            result = self._execute_single_move(m, dest_grids, i + 1, total)
+            if result == "ok":
                 success += 1
-                # Update virtual grids
-                if from_tab in dest_grids:
-                    dest_grids[from_tab].unmark(item)
-                dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
-            elif status == "swapped":
-                swap = result.get("swapped_item", {})
-                swap_uid = swap.get("unit_id", 0)
-                print(f"SWAP (displaced: {swap.get('name', '?')} id={swap_uid})")
-                # Our item was placed, but a displaced item is on cursor.
-                # We're on the dest tab — find a free spot there for the displaced item.
-                # First update virtual grid: our item is now at dest_x,dest_y
-                if from_tab in dest_grids:
-                    dest_grids[from_tab].unmark(item)
-                dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
-                # Find spot for displaced item (assume 1x1 for safety)
-                swap_spot = dest.find_spot(1, 1)
-                if swap_spot:
-                    self.mcp.call("cursor_to_container", {
-                        "item_id": swap_uid,
-                        "x": swap_spot[0], "y": swap_spot[1],
-                        "container": "stash",
-                    })
-                    time.sleep(0.3)
-                    dest.reserve_spot(swap_spot[0], swap_spot[1], 1, 1, swap_uid)
-                else:
-                    # No space on dest tab — try source tab
-                    self.mcp.call("switch_stash_tab", {"tab": from_tab})
-                    time.sleep(0.5)
-                    src = dest_grids.get(from_tab)
-                    src_spot = src.find_spot(1, 1) if src else None
-                    if src_spot:
-                        self.mcp.call("cursor_to_container", {
-                            "item_id": swap_uid,
-                            "x": src_spot[0], "y": src_spot[1],
-                            "container": "stash",
-                        })
-                        time.sleep(0.3)
-                    else:
-                        # Last resort: drop in inventory
-                        self.mcp.call("cursor_to_container", {
-                            "item_id": swap_uid, "x": 0, "y": 0,
-                            "container": "inventory",
-                        })
-                        time.sleep(0.3)
-                # Verify cursor is clear
-                cursor_check = self.mcp.call("get_cursor_item")
-                if cursor_check.get("has_item"):
-                    print(f"    WARN: cursor still occupied after swap handling!")
-                    # Drop to inventory as last resort
-                    self.mcp.call("cursor_to_container", {
-                        "item_id": cursor_check.get("unit_id", 0),
-                        "x": 0, "y": 0, "container": "inventory",
-                    })
-                    time.sleep(0.3)
-                success += 1
-            else:
-                print(f"FAIL ({status})")
+            elif result == "fail":
                 failed += 1
-                # If cursor has item, try to return it
-                cursor = self.mcp.call("get_cursor_item")
-                if cursor.get("has_item"):
-                    print(f"    Returning item to source tab {from_tab}...")
-                    self.mcp.call("switch_stash_tab", {"tab": from_tab})
-                    time.sleep(0.5)
-                    self.mcp.call("cursor_to_container", {
-                        "item_id": cursor.get("unit_id", uid),
-                        "x": item.get("grid_x", 0),
-                        "y": item.get("grid_y", 0),
-                        "container": "stash",
-                    })
-                    time.sleep(0.3)
+            else:
+                skipped += 1
 
         print(f"\n=== DONE: {success} moved, {failed} failed, {skipped} skipped ===")
 
