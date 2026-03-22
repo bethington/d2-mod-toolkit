@@ -452,6 +452,18 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "click_control"},
+            {"description", "Click a UI control by index (calls OnPress directly). Works at menu screens without foreground focus. Use get_controls to find indices."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"index", {{"type", "integer"}, {"description", "Control index from get_controls"}}}
+                }},
+                {"required", json::array({"index"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "quit_game"},
             {"description", "Fully close Diablo II. If in-game, saves first then terminates the process."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
@@ -1454,10 +1466,12 @@ namespace {
         if (name == "get_controls") {
             Control* pCtrl = *p_D2WIN_FirstControl;
             json controls = json::array();
+            int idx = 0;
             while (pCtrl) {
-                const char* typeNames[] = {"unknown", "editbox", "image", "unknown3", "unknown4", "unknown5", "button", "list"};
+                const char* typeNames[] = {"unknown", "editbox", "image", "unknown3", "textbox", "scrollbar", "button", "list"};
                 const char* typeName = (pCtrl->dwType <= 7) ? typeNames[pCtrl->dwType] : "unknown";
                 json ctrl = {
+                    {"index", idx},
                     {"type", typeName},
                     {"type_id", (int)pCtrl->dwType},
                     {"state", (int)pCtrl->dwState},
@@ -1465,12 +1479,83 @@ namespace {
                     {"y", (int)pCtrl->dwPosY},
                     {"w", (int)pCtrl->dwSizeX},
                     {"h", (int)pCtrl->dwSizeY},
-                    {"has_on_press", pCtrl->OnPress != nullptr}
+                    {"has_on_press", pCtrl->OnPress != nullptr},
+                    {"address", (int)(DWORD)pCtrl}
                 };
+                if (pCtrl->OnPress) {
+                    char buf[16]; snprintf(buf, sizeof(buf), "0x%08X", (DWORD)pCtrl->OnPress);
+                    ctrl["on_press_addr"] = buf;
+                }
+
+                // Read text content for TextBox controls (type 4)
+                if (pCtrl->dwType == 4) {
+                    struct TextReader {
+                        char lines[20][256];
+                        int count;
+                        static void Read(Control* p, TextReader& out) {
+                            out.count = 0;
+                            __try {
+                                TextBox* tb = (TextBox*)p;
+                                ControlText* ct = tb->pFirstText;
+                                while (ct && out.count < 20) {
+                                    for (int f = 0; f < 5; f++) {
+                                        if (ct->wText[f] && out.count < 20) {
+                                            WideCharToMultiByte(CP_UTF8, 0, ct->wText[f], -1,
+                                                out.lines[out.count], 255, nullptr, nullptr);
+                                            if (out.lines[out.count][0]) out.count++;
+                                        }
+                                    }
+                                    ct = ct->pNext;
+                                }
+                            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                        }
+                    };
+                    TextReader tr;
+                    TextReader::Read(pCtrl, tr);
+                    if (tr.count > 0) {
+                        json textLines = json::array();
+                        for (int t = 0; t < tr.count; t++) textLines.push_back(tr.lines[t]);
+                        ctrl["text"] = textLines;
+                    }
+                }
+
                 controls.push_back(ctrl);
                 pCtrl = pCtrl->pNext;
+                idx++;
             }
             json info = {{"count", controls.size()}, {"controls", controls}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        // Click a control by index (calls OnPress directly — works at menu, no foreground needed)
+        if (name == "click_control") {
+            int index = arguments.value("index", -1);
+            if (index < 0) {
+                return {{"content", {{{"type", "text"}, {"text", "index required"}}}}, {"isError", true}};
+            }
+            Control* pCtrl = *p_D2WIN_FirstControl;
+            int i = 0;
+            while (pCtrl && i < index) {
+                pCtrl = pCtrl->pNext;
+                i++;
+            }
+            if (!pCtrl) {
+                return {{"content", {{{"type", "text"}, {"text", "Control not found at index"}}}}, {"isError", true}};
+            }
+            if (!pCtrl->OnPress) {
+                return {{"content", {{{"type", "text"}, {"text", "Control has no OnPress callback"}}}}, {"isError", true}};
+            }
+            // Call OnPress (safe — no C++ objects in scope for SEH)
+            auto safePress = [](Control* c) -> bool {
+                __try { c->OnPress(c); return true; }
+                __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+            };
+            if (!safePress(pCtrl)) {
+                return {{"content", {{{"type", "text"}, {"text", "OnPress crashed"}}}}, {"isError", true}};
+            }
+            json info = {{"status", "clicked"}, {"index", index},
+                         {"type", (int)pCtrl->dwType},
+                         {"x", (int)pCtrl->dwPosX}, {"y", (int)pCtrl->dwPosY}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 

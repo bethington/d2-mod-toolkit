@@ -129,8 +129,8 @@ namespace {
             return OOG_CHAR_SELECT;
         }
 
-        // Priority 3: Main Menu — many buttons, no char slots
-        if (buttonCount >= 5 && type4Count == 0) {
+        // Priority 3: Main Menu — many buttons (5+), few type4 controls (0-1)
+        if (buttonCount >= 5 && type4Count <= 1) {
             return OOG_MAIN_MENU;
         }
 
@@ -272,27 +272,39 @@ namespace GameNav {
             }
 
             case OOG_DIALOG: {
-                g_status.currentScreen = "Dialog";
-                g_status.message = "Clicking OK on dialog...";
-                // Click ONLY the rightmost button (OK in D2 dialogs)
-                // Left button is typically Cancel which loops back
+                g_status.currentScreen = "Dialog/Gateway";
+                // PD2 shows a "SELECT GATEWAY" screen with a list of gateways.
+                // Strategy: first click the list entry (type 4 with OnPress) to select it,
+                // then click the rightmost button (OK) to accept.
+                // On even retries: click the list entry
+                // On odd retries: click the rightmost button (OK)
+                Control* listEntry = nullptr;
                 Control* okBtn = nullptr;
                 Control* p = *p_D2WIN_FirstControl;
                 while (p) {
+                    if (p->dwType == 4 && p->OnPress) {
+                        listEntry = p; // the gateway list entry
+                    }
                     if (p->dwType == CTRL_TYPE_BUTTON && p->OnPress) {
                         if (!okBtn || p->dwPosX > okBtn->dwPosX) {
-                            okBtn = p;
+                            okBtn = p; // rightmost = OK
                         }
                     }
                     p = p->pNext;
                 }
-                if (okBtn) {
+
+                if (g_retryCount % 2 == 0 && listEntry) {
+                    g_status.message = "Selecting gateway entry...";
+                    ClickControl(listEntry);
+                } else if (okBtn) {
+                    g_status.message = "Clicking OK on gateway...";
                     ClickControl(okBtn);
                 }
+
                 g_retryCount++;
                 if (g_retryCount > 30) {
                     g_status.state = NAV_FAILED;
-                    g_status.message = "Failed: stuck on dialog";
+                    g_status.message = "Failed: stuck on gateway";
                 }
                 return;
             }
