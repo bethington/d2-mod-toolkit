@@ -605,6 +605,18 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "switch_stash_tab"},
+            {"description", "Switch to a stash tab by clicking on it. 0=Personal, 1-9=Shared 1-9. Stash must be open."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"tab", {{"type", "integer"}, {"description", "Tab number: 0=Personal, 1-9=Shared"}}}
+                }},
+                {"required", json::array({"tab"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "open_stash"},
             {"description", "Find the stash chest in town and open it. Auto-walks to stash and interacts."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
@@ -1911,18 +1923,51 @@ namespace {
         if (name == "click_screen") {
             int x = arguments.value("x", 0);
             int y = arguments.value("y", 0);
+            std::string method = arguments.value("method", "sendinput");
 
             HWND hWnd = FindWindow(nullptr, "Diablo II");
             if (!hWnd) {
                 return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
             }
 
-            LPARAM lParam = MAKELPARAM(x, y);
-            PostMessage(hWnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
-            Sleep(50);
-            PostMessage(hWnd, WM_LBUTTONUP, 0, lParam);
+            if (method == "post") {
+                // PostMessage approach (doesn't work for PD2 custom UI)
+                LPARAM lParam = MAKELPARAM(x, y);
+                PostMessage(hWnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+                Sleep(50);
+                PostMessage(hWnd, WM_LBUTTONUP, 0, lParam);
+            } else {
+                // SetCursorPos + SendInput approach
+                // SetCursorPos for precise positioning (works with multi-monitor)
+                // SendInput for click only (no absolute move which has precision issues)
+                POINT pt = { x, y };
+                ClientToScreen(hWnd, &pt);
 
-            json info = {{"status", "clicked"}, {"x", x}, {"y", y}};
+                // Move cursor directly
+                SetCursorPos(pt.x, pt.y);
+                Sleep(50);
+
+                // Bring window to foreground
+                SetForegroundWindow(hWnd);
+                Sleep(100);
+
+                // Send click at current cursor position (no MOUSEEVENTF_ABSOLUTE)
+                INPUT inputs[2] = {};
+                inputs[0].type = INPUT_MOUSE;
+                inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+                inputs[1].type = INPUT_MOUSE;
+                inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+
+                SendInput(1, &inputs[0], sizeof(INPUT));
+                Sleep(50);
+                SendInput(1, &inputs[1], sizeof(INPUT));
+
+                json info = {{"status", "clicked"}, {"x", x}, {"y", y},
+                    {"screen_x", pt.x}, {"screen_y", pt.y}, {"method", "sendinput"}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+
+            json info = {{"status", "clicked"}, {"x", x}, {"y", y}, {"method", method}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
@@ -2065,6 +2110,43 @@ namespace {
             D2NET_SendPacket(9, 1, packet);
 
             json info = {{"status", "interact_sent"}, {"unit_id", unitId}, {"unit_type", unitType}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "switch_stash_tab") {
+            int tab = arguments.value("tab", 0);
+            if (tab < 0 || tab > 9) {
+                return {{"content", {{{"type", "text"}, {"text", "Tab must be 0-9"}}}}, {"isError", true}};
+            }
+
+            HWND hWnd = FindWindow(nullptr, "Diablo II");
+            if (!hWnd) {
+                return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
+            }
+
+            // Tab button positions in game client coordinates (1068x600)
+            // P=15, I=55, II=82, III=110, IV=140, V=168, VI=198, VII=230, VIII=265, IX=298
+            int tabX[] = { 15, 55, 82, 110, 140, 168, 198, 230, 265, 298 };
+            int tabY = 18;
+
+            POINT pt = { tabX[tab], tabY };
+            ClientToScreen(hWnd, &pt);
+            SetCursorPos(pt.x, pt.y);
+            Sleep(50);
+            SetForegroundWindow(hWnd);
+            Sleep(100);
+
+            INPUT inputs[2] = {};
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            inputs[1].type = INPUT_MOUSE;
+            inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+            SendInput(1, &inputs[0], sizeof(INPUT));
+            Sleep(50);
+            SendInput(1, &inputs[1], sizeof(INPUT));
+            Sleep(500); // wait for stash data to load
+
+            json info = {{"status", "switched"}, {"tab", tab}, {"click_x", tabX[tab]}, {"click_y", tabY}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
