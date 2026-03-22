@@ -344,7 +344,7 @@ class StashOrganizer:
         for tab in sorted(by_dest.keys()):
             tab_moves = by_dest[tab]
             name = self.layout.get(tab, {}).get("name", f"Tab {tab}")
-            print(f"→ Tab {tab} ({name}): {len(tab_moves)} items incoming")
+            print(f"-> Tab {tab} ({name}): {len(tab_moves)} items incoming")
             cats = {}
             for m in tab_moves:
                 cats[m["category"]] = cats.get(m["category"], 0) + 1
@@ -360,7 +360,7 @@ class StashOrganizer:
             outgoing = len([m for m in moves if m["from_tab"] == tab])
             final = current + incoming - outgoing
             free = self.tabs[tab].free_cells() if tab in self.tabs else 160
-            print(f"  Tab {tab}: {current} now, +{incoming} in, -{outgoing} out → ~{final} items ({free} free cells)")
+            print(f"  Tab {tab}: {current} now, +{incoming} in, -{outgoing} out -> ~{final} items ({free} free cells)")
 
     def execute_moves(self, moves, dry_run=False, max_moves=None):
         """Execute moves using move_item MCP tool with batched tab switching."""
@@ -412,7 +412,33 @@ class StashOrganizer:
                 continue
 
             dest_x, dest_y = spot
-            print(f"  [{i+1}/{len(moves)}] {m['name']} (tab {from_tab} → tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
+
+            # Pre-check: ensure cursor is empty
+            cursor_pre = self.mcp.call("get_cursor_item")
+            if cursor_pre.get("has_item"):
+                cuid = cursor_pre.get("unit_id", 0)
+                # Find a free inventory cell
+                inv_grid = self.mcp.call("get_stash_grid", {"container": "inventory"})
+                placed = False
+                for cy, row in enumerate(inv_grid.get("grid", [])):
+                    for cx, cell in enumerate(row):
+                        if cell == 0:
+                            self.mcp.call("cursor_to_container", {
+                                "item_id": cuid, "x": cx, "y": cy,
+                                "container": "inventory",
+                            })
+                            time.sleep(0.3)
+                            placed = True
+                            break
+                    if placed:
+                        break
+                cursor_re = self.mcp.call("get_cursor_item")
+                if cursor_re.get("has_item"):
+                    print(f"  [{i+1}/{len(moves)}] SKIP {m['name']}: cursor occupied (can't clear)")
+                    skipped += 1
+                    continue
+
+            print(f"  [{i+1}/{len(moves)}] {m['name']} (tab {from_tab} -> tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
 
             # Use move_item for atomic pick+switch+place
             result = self.mcp.call("move_item", {
@@ -433,19 +459,55 @@ class StashOrganizer:
                 dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
             elif status == "swapped":
                 swap = result.get("swapped_item", {})
-                print(f"SWAP (displaced: {swap.get('name', '?')})")
-                # Item placed but something came to cursor — need to put it back
-                self.mcp.call("cursor_to_container", {
-                    "item_id": swap.get("unit_id", 0),
-                    "x": item.get("grid_x", 0),
-                    "y": item.get("grid_y", 0),
-                    "container": "stash",
-                })
-                time.sleep(0.3)
-                success += 1
+                swap_uid = swap.get("unit_id", 0)
+                print(f"SWAP (displaced: {swap.get('name', '?')} id={swap_uid})")
+                # Our item was placed, but a displaced item is on cursor.
+                # We're on the dest tab — find a free spot there for the displaced item.
+                # First update virtual grid: our item is now at dest_x,dest_y
                 if from_tab in dest_grids:
                     dest_grids[from_tab].unmark(item)
                 dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+                # Find spot for displaced item (assume 1x1 for safety)
+                swap_spot = dest.find_spot(1, 1)
+                if swap_spot:
+                    self.mcp.call("cursor_to_container", {
+                        "item_id": swap_uid,
+                        "x": swap_spot[0], "y": swap_spot[1],
+                        "container": "stash",
+                    })
+                    time.sleep(0.3)
+                    dest.reserve_spot(swap_spot[0], swap_spot[1], 1, 1, swap_uid)
+                else:
+                    # No space on dest tab — try source tab
+                    self.mcp.call("switch_stash_tab", {"tab": from_tab})
+                    time.sleep(0.5)
+                    src = dest_grids.get(from_tab)
+                    src_spot = src.find_spot(1, 1) if src else None
+                    if src_spot:
+                        self.mcp.call("cursor_to_container", {
+                            "item_id": swap_uid,
+                            "x": src_spot[0], "y": src_spot[1],
+                            "container": "stash",
+                        })
+                        time.sleep(0.3)
+                    else:
+                        # Last resort: drop in inventory
+                        self.mcp.call("cursor_to_container", {
+                            "item_id": swap_uid, "x": 0, "y": 0,
+                            "container": "inventory",
+                        })
+                        time.sleep(0.3)
+                # Verify cursor is clear
+                cursor_check = self.mcp.call("get_cursor_item")
+                if cursor_check.get("has_item"):
+                    print(f"    WARN: cursor still occupied after swap handling!")
+                    # Drop to inventory as last resort
+                    self.mcp.call("cursor_to_container", {
+                        "item_id": cursor_check.get("unit_id", 0),
+                        "x": 0, "y": 0, "container": "inventory",
+                    })
+                    time.sleep(0.3)
+                success += 1
             else:
                 print(f"FAIL ({status})")
                 failed += 1
