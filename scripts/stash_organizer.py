@@ -585,6 +585,102 @@ class StashOrganizer:
         moves = self.plan_reorganization()
         self.execute_moves(moves, dry_run=dry_run, max_moves=max_moves)
 
+    def defrag_tab(self, tab: int, dry_run=False) -> int:
+        """Defragment a single tab by repacking items top-left.
+
+        Strategy: move items from the bottom/scattered positions into
+        gaps at the top. Only moves items that would actually change
+        position. Skips items already at their optimal spot.
+
+        For full tabs: picks items from the bottom, temporarily holds
+        on cursor, shifts items up to fill gaps, then places.
+        """
+        self.mcp.call("switch_stash_tab", {"tab": tab})
+        time.sleep(0.5)
+
+        items = self.scan_tab(tab)
+        if not items:
+            return 0
+
+        # Sort items: largest first for better packing
+        items.sort(key=lambda i: (i.get("size_x", 1) * i.get("size_y", 1)), reverse=True)
+
+        # Compute optimal placement
+        target = Container(name=f"Defrag {tab}", width=10, height=16, tab=tab)
+        placements = []
+        for item in items:
+            sx, sy = item.get("size_x", 1), item.get("size_y", 1)
+            spot = target.find_spot(sx, sy)
+            if spot:
+                target.reserve_spot(spot[0], spot[1], sx, sy, item["unit_id"])
+                placements.append((item, spot[0], spot[1]))
+
+        # Only move items that are NOT already at their target position
+        moves = [(item, tx, ty) for item, tx, ty in placements
+                 if item.get("grid_x", 0) != tx or item.get("grid_y", 0) != ty]
+
+        if not moves:
+            print(f"  Tab {tab}: already compact ({len(items)} items)")
+            return 0
+
+        print(f"  Tab {tab}: {len(moves)} of {len(items)} items need moving" +
+              (" [DRY]" if dry_run else ""))
+
+        if dry_run:
+            return 0
+
+        # Execute moves bottom-up: move items from highest Y first
+        # (items at the bottom are moved into gaps at the top)
+        moves.sort(key=lambda m: (-m[0].get("grid_y", 0), -m[0].get("grid_x", 0)))
+
+        moved = 0
+        for item, tx, ty in moves:
+            uid = item["unit_id"]
+
+            if not self._clear_cursor():
+                continue
+
+            result = self.mcp.call("move_item", {
+                "item_id": uid, "dest_container": "stash",
+                "dest_x": tx, "dest_y": ty,
+            }, timeout=10)
+
+            status = result.get("status", "unknown")
+            if status == "moved":
+                moved += 1
+            elif status == "swapped":
+                # Swap means target was occupied — item sizes didn't match plan.
+                # Clear cursor and continue (the swap displaced another item
+                # which may get moved in a later iteration)
+                self._clear_cursor()
+                moved += 1
+            else:
+                self._clear_cursor()
+
+        return moved
+
+    def defrag(self, tabs=None, dry_run=False):
+        """Defragment stash tabs to eliminate gaps.
+
+        Args:
+            tabs: list of tab indices to defrag, or None for all (1-9)
+            dry_run: if True, just show what would happen
+        """
+        if tabs is None:
+            tabs = list(range(1, 10))  # skip personal
+
+        print(f"\n=== DEFRAG {'(DRY RUN) ' if dry_run else ''}===\n")
+        total_moved = 0
+        for tab in tabs:
+            moved = self.defrag_tab(tab, dry_run=dry_run)
+            total_moved += moved
+
+        if not dry_run:
+            print(f"\n=== DEFRAG DONE: {total_moved} items repacked ===")
+        else:
+            print(f"\n=== DEFRAG DRY RUN: would repack items across {len(tabs)} tabs ===")
+        return total_moved
+
 
 # ---- CLI ----
 
@@ -593,6 +689,8 @@ def main():
     parser.add_argument("--scan", action="store_true", help="Scan all tabs and show layout")
     parser.add_argument("--plan", action="store_true", help="Show reorganization plan")
     parser.add_argument("--organize", action="store_true", help="Execute reorganization")
+    parser.add_argument("--defrag", action="store_true", help="Defrag tabs (repack items tightly)")
+    parser.add_argument("--defrag-tab", type=int, help="Defrag a specific tab only")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without moving")
     parser.add_argument("--max-moves", type=int, help="Limit number of moves")
     parser.add_argument("--url", default="http://127.0.0.1:21337")
@@ -616,16 +714,21 @@ def main():
     if args.scan:
         organizer.show_current()
 
-    if args.plan or args.dry_run:
+    is_defrag = args.defrag or args.defrag_tab is not None
+
+    if not is_defrag and (args.plan or args.dry_run):
         moves = organizer.plan_reorganization()
         organizer.show_plan(moves)
 
-    if args.organize:
+    if is_defrag:
+        tabs = [args.defrag_tab] if args.defrag_tab is not None else None
+        organizer.defrag(tabs=tabs, dry_run=args.dry_run)
+    elif args.organize:
         organizer.organize(max_moves=args.max_moves)
     elif args.dry_run:
         organizer.organize(dry_run=True)
 
-    if not any([args.scan, args.plan, args.organize, args.dry_run]):
+    if not any([args.scan, args.plan, args.organize, args.dry_run, is_defrag]):
         organizer.show_current()
 
 
