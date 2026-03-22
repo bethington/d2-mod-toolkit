@@ -1,8 +1,8 @@
 """Stash Organizer — Automated cross-tab inventory management.
 
 Scans all stash tabs, categorizes items, and reorganizes them according
-to a configurable layout. Uses kolbot-inspired Container pattern for
-grid management and safe item movement.
+to a configurable layout. Uses the move_item MCP tool for reliable
+atomic item movement with cursor verification.
 
 Usage:
     python stash_organizer.py --scan          # Scan and show current layout
@@ -34,19 +34,26 @@ class McpClient:
         self.url = url
         self._id = 0
 
-    def call(self, tool, args=None):
+    def call(self, tool, args=None, timeout=15):
         self._id += 1
         r = requests.post(f"{self.url}/mcp", json={
             "jsonrpc": "2.0", "id": self._id,
             "method": "tools/call",
             "params": {"name": tool, "arguments": args or {}}
-        }, timeout=15)
+        }, timeout=timeout)
         result = r.json()
-        if "result" in result and "content" in result["result"]:
-            text = result["result"]["content"][0].get("text", "")
-            if text.startswith(("{", "[")):
-                return json.loads(text)
-        return {}
+        text = ""
+        is_error = False
+        if "result" in result:
+            res = result["result"]
+            is_error = res.get("isError", False)
+            if "content" in res:
+                text = res["content"][0].get("text", "")
+        parsed = {}
+        if text.startswith(("{", "[")):
+            parsed = json.loads(text)
+        parsed["_is_error"] = is_error
+        return parsed
 
     def alive(self):
         try:
@@ -60,14 +67,10 @@ class McpClient:
 def categorize_item(name: str) -> str:
     """Categorize an item by its name into a storage category."""
     n = name.lower()
-
-    # Remove color codes
-    while "\xc3\xbf" in n or "ÿc" in n:
+    # Remove D2 color codes (ÿcX)
+    while "ÿc" in n:
         idx = n.find("ÿc")
-        if idx >= 0:
-            n = n[:idx] + n[idx+3:]  # skip ÿcX
-        else:
-            break
+        n = n[:idx] + n[idx+3:]
 
     if "charm" in n:
         if "grand" in n: return "Grand Charm"
@@ -75,9 +78,9 @@ def categorize_item(name: str) -> str:
         if "small" in n: return "Small Charm"
         return "Charm"
 
-    if any(x in n for x in ["ring"]): return "Ring"
-    if any(x in n for x in ["amulet"]): return "Amulet"
-    if any(x in n for x in ["jewel"]): return "Jewel"
+    if "ring" in n: return "Ring"
+    if "amulet" in n: return "Amulet"
+    if "jewel" in n: return "Jewel"
 
     if any(x in n for x in ["ruby", "sapphire", "emerald", "diamond",
                              "topaz", "amethyst", "skull"]): return "Gem"
@@ -87,12 +90,11 @@ def categorize_item(name: str) -> str:
     if any(x in n for x in ["scroll", "tome"]): return "Scroll/Tome"
     if "key" in n and "skeleton" not in n: return "Key"
 
-    if any(x in n for x in ["token"]): return "Token"
+    if "token" in n: return "Token"
     if any(x in n for x in ["voidstone", "vision of terror", "pandemonium",
                              "talisman", "bone fragment"]): return "PD2 Special"
     if "ear" in n: return "Ear"
 
-    # Equipment
     if any(x in n for x in ["boot", "greave"]): return "Boots"
     if any(x in n for x in ["glove", "gaunt", "fist", "vambrace"]): return "Gloves"
     if any(x in n for x in ["belt", "sash"]): return "Belt"
@@ -117,7 +119,7 @@ def categorize_item(name: str) -> str:
 
     if any(x in n for x in ["cube"]): return "Quest"
     if any(x in n for x in ["inifuss", "khalim", "horadric"]): return "Quest"
-    if any(x in n for x in ["skeleton key"]): return "PD2 Special"
+    if "skeleton key" in n: return "PD2 Special"
 
     return "Other"
 
@@ -149,21 +151,29 @@ class Container:
         self.items.append(item)
         return True
 
+    def unmark(self, item: dict):
+        """Remove an item from the grid."""
+        uid = item.get("unit_id")
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.grid[y][x] == uid:
+                    self.grid[y][x] = 0
+
     def find_spot(self, size_x: int, size_y: int) -> Optional[Tuple[int, int]]:
         """Find first available spot for an item of given size."""
         for y in range(self.height - size_y + 1):
             for x in range(self.width - size_x + 1):
-                fits = True
-                for dy in range(size_y):
-                    for dx in range(size_x):
-                        if self.grid[y + dy][x + dx] != 0:
-                            fits = False
-                            break
-                    if not fits:
-                        break
-                if fits:
+                if all(self.grid[y + dy][x + dx] == 0
+                       for dy in range(size_y) for dx in range(size_x)):
                     return (x, y)
         return None
+
+    def reserve_spot(self, x: int, y: int, w: int, h: int, uid: int):
+        """Reserve cells for a planned placement."""
+        for dy in range(h):
+            for dx in range(w):
+                if y + dy < self.height and x + dx < self.width:
+                    self.grid[y + dy][x + dx] = uid
 
     def free_cells(self) -> int:
         return sum(1 for row in self.grid for cell in row if cell == 0)
@@ -177,7 +187,6 @@ class Container:
 
 # ---- Tab Layout Configuration ----
 
-# Default layout — can be customized
 DEFAULT_LAYOUT = {
     0: {"name": "Personal (Sorc)", "categories": []},  # Don't touch personal
     1: {"name": "Jewelry & Charms", "categories": [
@@ -211,54 +220,76 @@ class StashOrganizer:
     def __init__(self, mcp_url="http://127.0.0.1:21337", layout=None):
         self.mcp = McpClient(mcp_url)
         self.layout = layout or DEFAULT_LAYOUT
-        self.tabs = {}  # tab -> Container
+        self.tabs = {}       # tab -> Container
         self.all_items = []  # flat list of all items across tabs
 
+    def scan_tab(self, tab: int) -> List[dict]:
+        """Scan a single tab and return its items with sizes."""
+        grid_data = self.mcp.call("get_stash_grid", {"container": "stash"})
+        inv = self.mcp.call("get_inventory")
+
+        items = [i for i in inv.get("items", []) if i.get("storage") == "stash"]
+
+        # Build size map from grid (deduce item sizes from grid occupancy)
+        grid = grid_data.get("grid", [])
+        uid_cells = {}  # uid -> set of (x,y)
+        for y, row in enumerate(grid):
+            for x, uid in enumerate(row):
+                if uid != 0:
+                    uid_cells.setdefault(uid, set()).add((x, y))
+
+        for item in items:
+            uid = item["unit_id"]
+            cells = uid_cells.get(uid, set())
+            if cells:
+                xs = [c[0] for c in cells]
+                ys = [c[1] for c in cells]
+                item["size_x"] = max(xs) - min(xs) + 1
+                item["size_y"] = max(ys) - min(ys) + 1
+            else:
+                item["size_x"] = 1
+                item["size_y"] = 1
+
+        return items
+
     def scan_all_tabs(self):
-        """Scan all 10 stash tabs and catalog items."""
-        tab_names = ["Personal"] + [f"Shared {i}" for i in range(1, 10)]
+        """Scan all stash tabs and catalog items."""
+        tab_names = ["Personal"] + [f"Shared {i}" for i in range(1, 10)] + ["Materials"]
         self.all_items = []
 
-        for tab in range(10):
+        for tab in range(10):  # 0-9 (skip Materials for organizing)
             print(f"Scanning tab {tab} ({tab_names[tab]})...", end=" ", flush=True)
-            self.mcp.call("switch_stash_tab", {"tab": tab})
-            time.sleep(2)
+            result = self.mcp.call("switch_stash_tab", {"tab": tab})
+            if result.get("_is_error"):
+                print("SKIP (switch failed)")
+                continue
+            time.sleep(0.5)
 
-            inv = self.mcp.call("get_inventory", {"location": "all"})
-            items = [i for i in inv.get("items", []) if i.get("storage") == "stash"]
-
+            items = self.scan_tab(tab)
             for item in items:
                 item["_tab"] = tab
                 item["_category"] = categorize_item(item["name"])
                 self.all_items.append(item)
 
-            container = Container(
-                name=tab_names[tab], width=10, height=16, tab=tab
-            )
+            container = Container(name=tab_names[tab], width=10, height=16, tab=tab)
             for item in items:
                 container.mark(item)
             self.tabs[tab] = container
 
-            print(f"{len(items)} items")
+            print(f"{len(items)} items, {container.free_cells()} free")
 
-        # Switch back to personal
         self.mcp.call("switch_stash_tab", {"tab": 0})
-        time.sleep(1)
-
-        print(f"\nTotal: {len(self.all_items)} items")
+        print(f"\nTotal: {len(self.all_items)} items across {len(self.tabs)} tabs")
 
     def show_current(self):
         """Display current layout summary."""
         print("\n=== CURRENT STASH LAYOUT ===\n")
-        for tab in range(10):
-            if tab not in self.tabs:
-                continue
+        for tab in sorted(self.tabs.keys()):
             container = self.tabs[tab]
             items = [i for i in self.all_items if i["_tab"] == tab]
             cats = {}
             for i in items:
-                cat = i["_category"]
-                cats[cat] = cats.get(cat, 0) + 1
+                cats[i["_category"]] = cats.get(i["_category"], 0) + 1
 
             print(f"Tab {tab} ({container.name}): {len(items)} items, {container.free_cells()} free cells")
             for cat in sorted(cats.keys()):
@@ -267,16 +298,16 @@ class StashOrganizer:
 
     def plan_reorganization(self):
         """Plan item movements based on layout configuration."""
-        moves = []  # list of (item, from_tab, to_tab)
+        moves = []
 
         # Skip tab 0 (personal)
-        moveable_items = [i for i in self.all_items if i["_tab"] != 0]
+        moveable = [i for i in self.all_items if i["_tab"] != 0]
 
-        for item in moveable_items:
+        for item in moveable:
             cat = item["_category"]
             current_tab = item["_tab"]
 
-            # Find the target tab for this category
+            # Find target tab for this category
             target_tab = None
             for tab, cfg in self.layout.items():
                 if tab == 0:
@@ -284,10 +315,8 @@ class StashOrganizer:
                 if cat in cfg.get("categories", []):
                     target_tab = tab
                     break
-
-            # If no specific tab, goes to overflow (tab 9)
             if target_tab is None:
-                target_tab = 9
+                target_tab = 9  # overflow
 
             if target_tab != current_tab:
                 moves.append({
@@ -295,9 +324,13 @@ class StashOrganizer:
                     "from_tab": current_tab,
                     "to_tab": target_tab,
                     "name": item["name"],
-                    "category": cat
+                    "category": cat,
+                    "size_x": item.get("size_x", 1),
+                    "size_y": item.get("size_y", 1),
                 })
 
+        # Sort moves to minimize tab switches: group by (from_tab, to_tab)
+        moves.sort(key=lambda m: (m["from_tab"], m["to_tab"]))
         return moves
 
     def show_plan(self, moves):
@@ -306,10 +339,7 @@ class StashOrganizer:
 
         by_dest = {}
         for m in moves:
-            dest = m["to_tab"]
-            if dest not in by_dest:
-                by_dest[dest] = []
-            by_dest[dest].append(m)
+            by_dest.setdefault(m["to_tab"], []).append(m)
 
         for tab in sorted(by_dest.keys()):
             tab_moves = by_dest[tab]
@@ -319,128 +349,133 @@ class StashOrganizer:
             for m in tab_moves:
                 cats[m["category"]] = cats.get(m["category"], 0) + 1
             for cat in sorted(cats.keys()):
-                print(f"    {cat}: {cats[cat]} from various tabs")
+                print(f"    {cat}: {cats[cat]}")
             print()
 
-        # Check if any destination tab would overflow
+        # Space check
         print("=== SPACE CHECK ===")
         for tab in sorted(by_dest.keys()):
-            current_count = len([i for i in self.all_items if i["_tab"] == tab])
+            current = len([i for i in self.all_items if i["_tab"] == tab])
             incoming = len(by_dest[tab])
             outgoing = len([m for m in moves if m["from_tab"] == tab])
-            final = current_count + incoming - outgoing
-            capacity = 10 * 16  # 160 cells, but items take multiple cells
-            print(f"  Tab {tab}: {current_count} now, +{incoming} in, -{outgoing} out = ~{final} items")
+            final = current + incoming - outgoing
+            free = self.tabs[tab].free_cells() if tab in self.tabs else 160
+            print(f"  Tab {tab}: {current} now, +{incoming} in, -{outgoing} out → ~{final} items ({free} free cells)")
 
-    def execute_move(self, item, from_tab, to_tab) -> bool:
-        """Move a single item from one tab to another.
+    def execute_moves(self, moves, dry_run=False, max_moves=None):
+        """Execute moves using move_item MCP tool with batched tab switching."""
+        if dry_run:
+            self.show_plan(moves)
+            print("\n[DRY RUN] No items moved.")
+            return
 
-        Pattern from kolbot:
-        1. Switch to source tab
-        2. Pick item to cursor
-        3. Check cursor has item
-        4. Switch to destination tab
-        5. Find free spot
-        6. Place item
-        7. Check cursor is empty
-        8. Retry up to 3 times
-        """
-        uid = item["unit_id"]
-        name = item["name"]
-
-        for attempt in range(3):
-            # Switch to source tab
-            self.mcp.call("switch_stash_tab", {"tab": from_tab})
-            time.sleep(1.5)
-
-            # Pick to cursor
-            self.mcp.call("item_to_cursor", {"item_id": uid})
-            time.sleep(0.5)
-
-            # Verify cursor
-            cursor = self.mcp.call("get_cursor_item")
-            if not cursor.get("has_item"):
-                print(f"  WARN: Failed to pick up {name} (attempt {attempt+1})")
-                time.sleep(1)
-                continue
-
-            # Switch to destination tab
-            self.mcp.call("switch_stash_tab", {"tab": to_tab})
-            time.sleep(1.5)
-
-            # Find free spot using grid
-            grid = self.mcp.call("get_stash_grid", {"container": "stash"})
-            # Find first free cell (simple 1x1 placement for now)
-            placed = False
-            for y in range(grid.get("height", 16)):
-                for x in range(grid.get("width", 10)):
-                    if grid["grid"][y][x] == 0:
-                        self.mcp.call("cursor_to_container", {
-                            "item_id": uid, "x": x, "y": y, "container": "stash"
-                        })
-                        time.sleep(0.5)
-
-                        # Check cursor is empty
-                        cursor = self.mcp.call("get_cursor_item")
-                        if not cursor.get("has_item"):
-                            print(f"  OK: {name} → tab {to_tab} at ({x},{y})")
-                            placed = True
-                            break
-                if placed:
-                    break
-
-            if placed:
-                return True
-
-            # If still on cursor, try to put it back
-            print(f"  WARN: Couldn't place {name} in tab {to_tab}, returning to tab {from_tab}")
-            self.mcp.call("switch_stash_tab", {"tab": from_tab})
-            time.sleep(1.5)
-            # Find a spot in the original tab
-            self.mcp.call("cursor_to_container", {
-                "item_id": uid, "x": item["grid_x"], "y": item["grid_y"], "container": "stash"
-            })
-            time.sleep(0.5)
-            return False
-
-        return False
-
-    def organize(self, dry_run=False, max_moves=None):
-        """Execute the full reorganization."""
-        moves = self.plan_reorganization()
         if not moves:
             print("Nothing to reorganize!")
             return
 
         self.show_plan(moves)
-
-        if dry_run:
-            print("\n[DRY RUN] No items moved.")
-            return
-
         print(f"\n=== EXECUTING {len(moves)} MOVES ===\n")
+
+        # Pre-compute target positions for each destination tab
+        dest_grids = {}  # tab -> Container (virtual grid for placement planning)
+        for tab in self.tabs:
+            dest_grids[tab] = Container(
+                name=f"Plan {tab}", width=10, height=16, tab=tab,
+                grid=[row[:] for row in self.tabs[tab].grid]  # deep copy
+            )
+
         success = 0
         failed = 0
+        skipped = 0
 
         for i, m in enumerate(moves):
             if max_moves and i >= max_moves:
                 print(f"\nStopped after {max_moves} moves (limit reached)")
                 break
 
-            print(f"[{i+1}/{len(moves)}] Moving {m['name']} from tab {m['from_tab']} to tab {m['to_tab']}...")
-            if self.execute_move(m["item"], m["from_tab"], m["to_tab"]):
-                success += 1
-            else:
-                failed += 1
+            item = m["item"]
+            uid = item["unit_id"]
+            from_tab = m["from_tab"]
+            to_tab = m["to_tab"]
+            sx, sy = m["size_x"], m["size_y"]
 
-        print(f"\n=== DONE: {success} moved, {failed} failed ===")
+            # Find a free spot in the destination grid
+            dest = dest_grids.get(to_tab)
+            if not dest:
+                dest = Container(name=f"Tab {to_tab}", width=10, height=16, tab=to_tab)
+                dest_grids[to_tab] = dest
+
+            spot = dest.find_spot(sx, sy)
+            if not spot:
+                print(f"  [{i+1}/{len(moves)}] SKIP {m['name']}: no space in tab {to_tab}")
+                skipped += 1
+                continue
+
+            dest_x, dest_y = spot
+            print(f"  [{i+1}/{len(moves)}] {m['name']} (tab {from_tab} → tab {to_tab} at {dest_x},{dest_y})...", end=" ", flush=True)
+
+            # Use move_item for atomic pick+switch+place
+            result = self.mcp.call("move_item", {
+                "item_id": uid,
+                "dest_container": "stash",
+                "dest_x": dest_x,
+                "dest_y": dest_y,
+                "dest_tab": to_tab,
+            }, timeout=20)
+
+            status = result.get("status", "unknown")
+            if status == "moved":
+                print("OK")
+                success += 1
+                # Update virtual grids
+                if from_tab in dest_grids:
+                    dest_grids[from_tab].unmark(item)
+                dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+            elif status == "swapped":
+                swap = result.get("swapped_item", {})
+                print(f"SWAP (displaced: {swap.get('name', '?')})")
+                # Item placed but something came to cursor — need to put it back
+                self.mcp.call("cursor_to_container", {
+                    "item_id": swap.get("unit_id", 0),
+                    "x": item.get("grid_x", 0),
+                    "y": item.get("grid_y", 0),
+                    "container": "stash",
+                })
+                time.sleep(0.3)
+                success += 1
+                if from_tab in dest_grids:
+                    dest_grids[from_tab].unmark(item)
+                dest.reserve_spot(dest_x, dest_y, sx, sy, uid)
+            else:
+                print(f"FAIL ({status})")
+                failed += 1
+                # If cursor has item, try to return it
+                cursor = self.mcp.call("get_cursor_item")
+                if cursor.get("has_item"):
+                    print(f"    Returning item to source tab {from_tab}...")
+                    self.mcp.call("switch_stash_tab", {"tab": from_tab})
+                    time.sleep(0.5)
+                    self.mcp.call("cursor_to_container", {
+                        "item_id": cursor.get("unit_id", uid),
+                        "x": item.get("grid_x", 0),
+                        "y": item.get("grid_y", 0),
+                        "container": "stash",
+                    })
+                    time.sleep(0.3)
+
+        print(f"\n=== DONE: {success} moved, {failed} failed, {skipped} skipped ===")
+
+    def organize(self, dry_run=False, max_moves=None):
+        """Full reorganization pipeline."""
+        moves = self.plan_reorganization()
+        self.execute_moves(moves, dry_run=dry_run, max_moves=max_moves)
 
 
 # ---- CLI ----
 
 def main():
     parser = argparse.ArgumentParser(description="Stash Organizer")
-    parser.add_argument("--scan", action="store_true", help="Scan all tabs")
+    parser.add_argument("--scan", action="store_true", help="Scan all tabs and show layout")
     parser.add_argument("--plan", action="store_true", help="Show reorganization plan")
     parser.add_argument("--organize", action="store_true", help="Execute reorganization")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without moving")
@@ -451,7 +486,13 @@ def main():
     organizer = StashOrganizer(args.url)
 
     if not organizer.mcp.alive():
-        print("ERROR: MCP server not responding")
+        print("ERROR: MCP server not responding at", args.url)
+        sys.exit(1)
+
+    # Check game state
+    state = organizer.mcp.call("get_game_state")
+    if state.get("state") != "in_game":
+        print(f"ERROR: Not in game (state: {state.get('state', 'unknown')})")
         sys.exit(1)
 
     print("Scanning all stash tabs...")
