@@ -29,6 +29,8 @@
 #include <functional>
 #include <fstream>
 #include <psapi.h>
+#include <eh.h>
+#include <stdexcept>
 
 // cpp-httplib — single header HTTP server
 #include "../ThirdParty/httplib.h"
@@ -242,6 +244,12 @@ namespace {
                 }},
                 {"required", json::array()}
             }}
+        });
+
+        tools.push_back({
+            {"name", "get_game_state"},
+            {"description", "Get current game state: in_game, menu, loading, or unknown. Also reports if paused and frame count."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
         tools.push_back({
@@ -914,6 +922,38 @@ namespace {
             return {{"content", {{{"type", "text"}, {"text", "Exit game queued — will save and return to menu"}}}}};
         }
 
+        if (name == "get_game_state") {
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            Control* pCtrl = *p_D2WIN_FirstControl;
+
+            std::string state;
+            if (pPlayer && pPlayer->pPath) {
+                state = "in_game";
+            } else if (pCtrl) {
+                state = "menu";
+            } else if (pPlayer && !pPlayer->pPath) {
+                state = "loading";
+            } else {
+                state = "unknown";
+            }
+
+            json info = {
+                {"state", state},
+                {"paused", GamePause::IsPaused()},
+                {"frame", GamePause::GetFrameCount()},
+                {"mcp_requests", g_requestCount.load()}
+            };
+
+            if (state == "in_game" && GameState::IsGameReady()) {
+                auto ps = GameState::GetPlayerState();
+                info["area"] = ps.area;
+                info["area_name"] = ps.areaName;
+                info["difficulty"] = ps.difficulty;
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
         if (name == "get_controls") {
             Control* pCtrl = *p_D2WIN_FirstControl;
             json controls = json::array();
@@ -1535,7 +1575,21 @@ namespace {
         };
     }
 
+    std::atomic<bool> g_shouldRun{false};
+
+    // Structured exception filter for the HTTP server thread
+    static LONG WINAPI ServerExceptionFilter(PEXCEPTION_POINTERS) {
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
     void ServerThread() {
+        // Translate SEH exceptions to C++ exceptions so we can catch them
+        _set_se_translator([](unsigned int code, EXCEPTION_POINTERS*) {
+            throw std::runtime_error("SEH exception in MCP server");
+        });
+
+        while (g_shouldRun) {
+        // Create server (re-created on each restart)
         g_server = new httplib::Server();
 
         // CORS headers for browser/tool access
@@ -1696,8 +1750,22 @@ namespace {
         });
 
         g_running = true;
-        g_server->listen("127.0.0.1", g_port);
+        try {
+            g_server->listen("127.0.0.1", g_port);
+        } catch (...) {
+            // Server crashed — will restart via loop
+        }
         g_running = false;
+
+        // Clean up server
+        delete g_server;
+        g_server = nullptr;
+
+        // If we should still be running, wait before restarting
+        if (g_shouldRun) {
+            Sleep(1000); // brief delay before restart
+        }
+        } // end while(g_shouldRun)
     }
 }
 
@@ -1706,11 +1774,13 @@ namespace McpServer {
         if (g_running) return;
         g_port = port;
         g_requestCount = 0;
+        g_shouldRun = true;
         g_thread = std::thread(ServerThread);
         g_thread.detach();
     }
 
     void Shutdown() {
+        g_shouldRun = false;  // stop restart loop
         if (g_server) {
             g_server->stop();
         }
