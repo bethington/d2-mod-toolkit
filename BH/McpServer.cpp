@@ -33,6 +33,8 @@
 #include <psapi.h>
 #include <eh.h>
 #include <stdexcept>
+#include <cmath>
+#include <algorithm>
 
 // cpp-httplib — single header HTTP server
 #include "../ThirdParty/httplib.h"
@@ -575,6 +577,49 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "interact_object"},
+            {"description", "Interact with a game object (stash, waypoint, NPC, shrine, etc). Auto-walks to and interacts. Use get_nearby_objects to find objects first."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"unit_id", {{"type", "integer"}, {"description", "Object unit ID"}}},
+                    {"unit_type", {{"type", "integer"}, {"description", "Unit type (default 2 for objects, 1 for NPCs)"}}}
+                }},
+                {"required", json::array({"unit_id"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "open_stash"},
+            {"description", "Find the stash chest in town and open it. Auto-walks to stash and interacts."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "open_cube"},
+            {"description", "Open the Horadric Cube panel (must have cube in inventory)."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "close_panels"},
+            {"description", "Close all open UI panels (stash, cube, trade, etc)."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "get_nearby_objects"},
+            {"description", "List nearby game objects (stash, waypoint, shrines, chests, portals) with unit IDs and positions."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"max_distance", {{"type", "integer"}, {"description", "Max distance (default 50)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
             {"name", "use_item"},
             {"description", "Use an item by unit ID (drink potion, read scroll, etc). Works for belt, inventory, stash, cube items."},
             {"inputSchema", {
@@ -1016,12 +1061,36 @@ namespace {
 
                         int qty = D2COMMON_GetUnitStat(pItem, STAT_AMMOQUANTITY, 0);
 
+                        // Get grid position from ItemPath
+                        int gridX = 0, gridY = 0;
+                        if (pItem->pPath) {
+                            ItemPath* ip = (ItemPath*)pItem->pPath;
+                            gridX = (int)ip->dwPosX;
+                            gridY = (int)ip->dwPosY;
+                        }
+
+                        // Get item size (width/height) from item data
+                        // Items occupy WxH cells in the grid
+                        int itemW = 1, itemH = 1;
+                        // We can approximate from the item type
+                        // Armor/weapons are typically 2x3 or 2x4, charms 1x1 to 1x3
+                        // For now include raw grid pos
+
+                        // Get ItemLocation for storage type distinction
+                        int itemLoc = pItem->pItemData->ItemLocation;
+                        const char* storageNames[] = {"inventory", "?", "belt", "cube", "stash"};
+                        const char* storageName = (itemLoc >= 0 && itemLoc <= 4) ? storageNames[itemLoc] : "?";
+
                         json item = {
                             {"code", (int)pItem->dwTxtFileNo},
                             {"name", name[0] ? name : "?"},
                             {"location", loc},
+                            {"storage", storageName},
                             {"node_page", np},
-                            {"unit_id", (int)pItem->dwUnitId}
+                            {"item_location", itemLoc},
+                            {"unit_id", (int)pItem->dwUnitId},
+                            {"grid_x", gridX},
+                            {"grid_y", gridY}
                         };
                         if (qty > 0) item["quantity"] = qty;
                         items.push_back(item);
@@ -1791,6 +1860,131 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
             return {{"content", {{{"type", "text"}, {"text", "Failed to save"}}}}, {"isError", true}};
+        }
+
+        if (name == "get_nearby_objects") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int maxDist = arguments.value("max_distance", 50);
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pPath || !pPlayer->pAct) {
+                return {{"content", {{{"type", "text"}, {"text", "No player"}}}}, {"isError", true}};
+            }
+            int px = pPlayer->pPath->xPos, py = pPlayer->pPath->yPos;
+
+            json objects = json::array();
+            for (Room1* room = pPlayer->pAct->pRoom1; room; room = room->pRoomNext) {
+                for (UnitAny* u = room->pUnitFirst; u; u = u->pListNext) {
+                    if (u->dwType != 2) continue; // UNIT_OBJECT only
+                    int ux = 0, uy = 0;
+                    if (u->pPath) { ux = u->pPath->xPos; uy = u->pPath->yPos; }
+                    int dx = ux - px, dy = uy - py;
+                    int dist = (int)sqrt((double)(dx*dx + dy*dy));
+                    if (dist > maxDist) continue;
+
+                    char objName[64] = {};
+                    SafeGetUnitName(u, objName, sizeof(objName));
+
+                    char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", (DWORD)u);
+                    objects.push_back({
+                        {"unit_id", (int)u->dwUnitId},
+                        {"class_id", (int)u->dwTxtFileNo},
+                        {"name", objName[0] ? objName : "?"},
+                        {"distance", dist},
+                        {"position", {{"x", ux}, {"y", uy}}},
+                        {"mode", (int)u->dwMode}
+                    });
+                }
+            }
+            // Sort by distance
+            std::sort(objects.begin(), objects.end(),
+                [](const json& a, const json& b) { return a["distance"] < b["distance"]; });
+
+            json info = {{"count", objects.size()}, {"objects", objects}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "interact_object") {
+            DWORD unitId = arguments.value("unit_id", 0);
+            DWORD unitType = arguments.value("unit_type", 2); // default: object
+
+            BYTE packet[9] = {};
+            packet[0] = 0x13;
+            *(DWORD*)&packet[1] = unitType;
+            *(DWORD*)&packet[5] = unitId;
+            D2NET_SendPacket(9, 1, packet);
+
+            json info = {{"status", "interact_sent"}, {"unit_id", unitId}, {"unit_type", unitType}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "open_stash") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pPath || !pPlayer->pAct) {
+                return {{"content", {{{"type", "text"}, {"text", "No player"}}}}, {"isError", true}};
+            }
+            int px = pPlayer->pPath->xPos, py = pPlayer->pPath->yPos;
+
+            // Find the stash object — scan for objects with "Stash" or "Bank" in name
+            UnitAny* stash = nullptr;
+            int bestDist = 999;
+            for (Room1* room = pPlayer->pAct->pRoom1; room; room = room->pRoomNext) {
+                for (UnitAny* u = room->pUnitFirst; u; u = u->pListNext) {
+                    if (u->dwType != 2) continue;
+                    char objName[64] = {};
+                    SafeGetUnitName(u, objName, sizeof(objName));
+                    // Check for stash-related names
+                    if (strstr(objName, "tash") || strstr(objName, "Bank") || strstr(objName, "bank") ||
+                        u->dwTxtFileNo == 267 || u->dwTxtFileNo == 580 || u->dwTxtFileNo == 581) {
+                        int ux = u->pPath ? u->pPath->xPos : 0;
+                        int uy = u->pPath ? u->pPath->yPos : 0;
+                        int dx = ux - px, dy = uy - py;
+                        int dist = (int)sqrt((double)(dx*dx + dy*dy));
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            stash = u;
+                        }
+                    }
+                }
+            }
+
+            if (!stash) {
+                return {{"content", {{{"type", "text"}, {"text", "No stash found nearby. Are you in town?"}}}}, {"isError", true}};
+            }
+
+            // Send interact packet — auto-walks and opens
+            BYTE packet[9] = {};
+            packet[0] = 0x13;
+            *(DWORD*)&packet[1] = 2; // UNIT_OBJECT
+            *(DWORD*)&packet[5] = stash->dwUnitId;
+            D2NET_SendPacket(9, 1, packet);
+
+            char objName[64] = {};
+            SafeGetUnitName(stash, objName, sizeof(objName));
+
+            json info = {
+                {"status", "interact_sent"},
+                {"stash_id", (int)stash->dwUnitId},
+                {"stash_class", (int)stash->dwTxtFileNo},
+                {"stash_name", objName},
+                {"distance", bestDist}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "open_cube") {
+            // Toggle cube UI panel via SetUIVar
+            D2CLIENT_SetUIVar(UI_CUBE, 1, 0);
+            return {{"content", {{{"type", "text"}, {"text", "Cube panel toggled"}}}}};
+        }
+
+        if (name == "close_panels") {
+            D2CLIENT_CloseInteract();
+            return {{"content", {{{"type", "text"}, {"text", "Panels closed"}}}}};
         }
 
         if (name == "use_item") {
