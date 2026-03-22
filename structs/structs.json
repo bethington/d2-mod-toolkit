@@ -1,0 +1,675 @@
+{
+  "Inventory": {
+    "fields": [
+      {
+        "name": "dwSignature",
+        "offset": 0,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_1",
+        "offset": 4,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pOwner",
+        "offset": 8,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pFirstItem",
+        "offset": 12,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pLastItem",
+        "offset": 16,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_2",
+        "offset": 20,
+        "size": 12,
+        "type": "padding"
+      },
+      {
+        "name": "pCursorItem",
+        "offset": 32,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_3",
+        "offset": 36,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "dwItemCount",
+        "offset": 40,
+        "size": 4,
+        "type": "dword"
+      }
+    ],
+    "name": "Inventory",
+    "size": 48,
+    "source": "builtin"
+  },
+  "ItemData": {
+    "fields": [
+      {
+        "name": "dwQuality",
+        "offset": 0,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_1",
+        "offset": 4,
+        "size": 8,
+        "type": "padding"
+      },
+      {
+        "name": "dwItemFlags",
+        "offset": 12,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_2",
+        "offset": 16,
+        "size": 24,
+        "type": "padding"
+      },
+      {
+        "name": "dwFileIndex",
+        "offset": 40,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_3",
+        "offset": 44,
+        "size": 24,
+        "type": "padding"
+      },
+      {
+        "name": "BodyLocation",
+        "offset": 68,
+        "size": 1,
+        "type": "byte"
+      },
+      {
+        "name": "ItemLocation",
+        "offset": 69,
+        "size": 1,
+        "type": "byte"
+      },
+      {
+        "name": "_4",
+        "offset": 70,
+        "size": 35,
+        "type": "padding"
+      },
+      {
+        "comment": "1=storage,2=belt,3=equipped",
+        "name": "NodePage",
+        "offset": 105,
+        "size": 1,
+        "type": "byte"
+      }
+    ],
+    "name": "ItemData",
+    "size": 144,
+    "source": "builtin"
+  },
+  "ItemPath": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 12,
+        "type": "padding"
+      },
+      {
+        "comment": "grid X / belt slot",
+        "name": "dwPosX",
+        "offset": 12,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "comment": "grid Y",
+        "name": "dwPosY",
+        "offset": 16,
+        "size": 4,
+        "type": "dword"
+      }
+    ],
+    "name": "ItemPath",
+    "size": 20,
+    "source": "builtin"
+  },
+  "Level": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "_2",
+        "offset": 4,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "_3",
+        "offset": 8,
+        "size": 248,
+        "type": "padding"
+      },
+      {
+        "comment": "area ID",
+        "name": "dwLevelNo",
+        "offset": 464,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_4",
+        "offset": 468,
+        "size": 88,
+        "type": "padding"
+      },
+      {
+        "name": "pNextLevel",
+        "offset": 556,
+        "points_to": "Level",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "Level",
+    "size": 560,
+    "source": "builtin"
+  },
+  "MonsterData": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 22,
+        "type": "padding"
+      },
+      {
+        "comment": "bit0=boss,bit1=champion,bit2=minion",
+        "name": "fBoss",
+        "offset": 22,
+        "size": 1,
+        "type": "byte"
+      }
+    ],
+    "name": "MonsterData",
+    "size": 96,
+    "source": "builtin"
+  },
+  "Path": {
+    "fields": [
+      {
+        "name": "xOffset",
+        "offset": 0,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "xPos",
+        "offset": 2,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "yOffset",
+        "offset": 4,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "yPos",
+        "offset": 6,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "_1",
+        "offset": 8,
+        "size": 8,
+        "type": "padding"
+      },
+      {
+        "name": "xTarget",
+        "offset": 16,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "yTarget",
+        "offset": 18,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "_2",
+        "offset": 20,
+        "size": 8,
+        "type": "padding"
+      },
+      {
+        "name": "pRoom1",
+        "offset": 28,
+        "points_to": "Room1",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pRoomUnk",
+        "offset": 32,
+        "points_to": "Room1",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_3",
+        "offset": 36,
+        "size": 12,
+        "type": "padding"
+      },
+      {
+        "name": "pUnit",
+        "offset": 48,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "Path",
+    "size": 100,
+    "source": "builtin"
+  },
+  "PlayerData": {
+    "fields": [
+      {
+        "comment": "character name",
+        "name": "szName",
+        "offset": 0,
+        "size": 16,
+        "type": "string"
+      }
+    ],
+    "name": "PlayerData",
+    "size": 368,
+    "source": "builtin"
+  },
+  "Room1": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pRoomsNear",
+        "offset": 4,
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_2",
+        "offset": 8,
+        "size": 16,
+        "type": "padding"
+      },
+      {
+        "name": "pRoom2",
+        "offset": 24,
+        "points_to": "Room2",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_3",
+        "offset": 28,
+        "size": 20,
+        "type": "padding"
+      },
+      {
+        "comment": "first unit in room",
+        "name": "pUnitFirst",
+        "offset": 48,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_4",
+        "offset": 52,
+        "size": 44,
+        "type": "padding"
+      },
+      {
+        "name": "pRoomNext",
+        "offset": 96,
+        "points_to": "Room1",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "Room1",
+    "size": 128,
+    "source": "builtin"
+  },
+  "Room2": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "_2",
+        "offset": 4,
+        "size": 28,
+        "type": "padding"
+      },
+      {
+        "name": "pLevel",
+        "offset": 32,
+        "points_to": "Level",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "Room2",
+    "size": 80,
+    "source": "builtin"
+  },
+  "StatList": {
+    "fields": [
+      {
+        "name": "_1",
+        "offset": 0,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pUnit",
+        "offset": 4,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "dwUnitType",
+        "offset": 8,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "dwUnitId",
+        "offset": 12,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_2",
+        "offset": 16,
+        "size": 20,
+        "type": "padding"
+      },
+      {
+        "name": "pStat",
+        "offset": 36,
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "wStatCount1",
+        "offset": 40,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "wSize",
+        "offset": 42,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "pPrevLink",
+        "offset": 44,
+        "points_to": "StatList",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_3",
+        "offset": 48,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pPrev",
+        "offset": 52,
+        "points_to": "StatList",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_4",
+        "offset": 56,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pNext",
+        "offset": 60,
+        "points_to": "StatList",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "StatList",
+    "size": 64,
+    "source": "builtin"
+  },
+  "UnitAny": {
+    "fields": [
+      {
+        "comment": "0=Player,1=Monster,2=Object,3=Missile,4=Item,5=Tile",
+        "name": "dwType",
+        "offset": 0,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "comment": "class/item/monster ID",
+        "name": "dwTxtFileNo",
+        "offset": 4,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_1",
+        "offset": 8,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "comment": "unique unit ID",
+        "name": "dwUnitId",
+        "offset": 12,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "comment": "animation mode (0=death,12=dead)",
+        "name": "dwMode",
+        "offset": 16,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "comment": "PlayerData/ItemData/MonsterData/ObjectData",
+        "name": "pData",
+        "offset": 20,
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "dwAct",
+        "offset": 24,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "pAct",
+        "offset": 28,
+        "points_to": "Act",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "array_count": 2,
+        "name": "dwSeed",
+        "offset": 32,
+        "size": 8,
+        "type": "array"
+      },
+      {
+        "name": "_2",
+        "offset": 40,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "pPath",
+        "offset": 44,
+        "points_to": "Path",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_3",
+        "offset": 48,
+        "size": 44,
+        "type": "padding"
+      },
+      {
+        "name": "pStats",
+        "offset": 92,
+        "points_to": "StatList",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pInventory",
+        "offset": 96,
+        "points_to": "Inventory",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_4",
+        "offset": 100,
+        "size": 40,
+        "type": "padding"
+      },
+      {
+        "name": "wX",
+        "offset": 140,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "wY",
+        "offset": 142,
+        "size": 2,
+        "type": "word"
+      },
+      {
+        "name": "_5",
+        "offset": 144,
+        "size": 4,
+        "type": "padding"
+      },
+      {
+        "name": "dwOwnerType",
+        "offset": 148,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "dwOwnerId",
+        "offset": 152,
+        "size": 4,
+        "type": "dword"
+      },
+      {
+        "name": "_6",
+        "offset": 156,
+        "size": 12,
+        "type": "padding"
+      },
+      {
+        "comment": "skills",
+        "name": "pInfo",
+        "offset": 168,
+        "points_to": "Info",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "_7",
+        "offset": 172,
+        "size": 52,
+        "type": "padding"
+      },
+      {
+        "name": "pChangedNext",
+        "offset": 224,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pRoomNext",
+        "offset": 228,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      },
+      {
+        "name": "pListNext",
+        "offset": 232,
+        "points_to": "UnitAny",
+        "size": 4,
+        "type": "pointer"
+      }
+    ],
+    "name": "UnitAny",
+    "size": 236,
+    "source": "builtin"
+  }
+}
