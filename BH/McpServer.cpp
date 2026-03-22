@@ -713,6 +713,33 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "walk_to"},
+            {"description", "Walk or run the character to a world coordinate. Use get_player_state for current position."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"x", {{"type", "integer"}, {"description", "Target world X coordinate"}}},
+                    {"y", {{"type", "integer"}, {"description", "Target world Y coordinate"}}},
+                    {"run", {{"type", "boolean"}, {"description", "Run instead of walk (default true)"}}}
+                }},
+                {"required", json::array({"x", "y"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "sell_item"},
+            {"description", "Sell an item to the currently open NPC trade window. NPC trade must be open (use interact_object on NPC first)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"item_id", {{"type", "integer"}, {"description", "Item unit ID to sell"}}},
+                    {"npc_id", {{"type", "integer"}, {"description", "NPC unit ID (the vendor)"}}}
+                }},
+                {"required", json::array({"item_id", "npc_id"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "interact_object"},
             {"description", "Interact with a game object (stash, waypoint, NPC, shrine, etc). Auto-walks to and interacts. Use get_nearby_objects to find objects first."},
             {"inputSchema", {
@@ -2308,40 +2335,99 @@ namespace {
             }
             int maxDist = arguments.value("max_distance", 50);
             UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
-            if (!pPlayer || !pPlayer->pPath || !pPlayer->pAct) {
+            if (!pPlayer || !pPlayer->pPath) {
                 return {{"content", {{{"type", "text"}, {"text", "No player"}}}}, {"isError", true}};
             }
             int px = pPlayer->pPath->xPos, py = pPlayer->pPath->yPos;
 
+            // Scan objects via unit hash table (type 2, 128 buckets)
             json objects = json::array();
-            for (Room1* room = pPlayer->pAct->pRoom1; room; room = room->pRoomNext) {
-                for (UnitAny* u = room->pUnitFirst; u; u = u->pListNext) {
-                    if (u->dwType != 2) continue; // UNIT_OBJECT only
-                    int ux = 0, uy = 0;
-                    if (u->pPath) { ux = u->pPath->xPos; uy = u->pPath->yPos; }
-                    int dx = ux - px, dy = uy - py;
-                    int dist = (int)sqrt((double)(dx*dx + dy*dy));
-                    if (dist > maxDist) continue;
+            UnitAny** pTable = (UnitAny**)*Var_D2CLIENT_pUnitTable();
+            if (pTable) {
+                for (int bucket = 0; bucket < 128; bucket++) {
+                    UnitAny* u = pTable[256 + bucket]; // type 2 starts at 2*128
+                    while (u) {
+                        if (u->dwType == 2 && u->pPath) {
+                            // Objects use ObjectPath: pos at +0x0C and +0x10 (DWORD, not WORD)
+                            ObjectPath* op = (ObjectPath*)u->pPath;
+                            int ux = (int)op->dwPosX, uy = (int)op->dwPosY;
+                            int dx = ux - px, dy = uy - py;
+                            int dist = (int)sqrt((double)(dx*dx + dy*dy));
 
-                    char objName[64] = {};
-                    SafeGetUnitName(u, objName, sizeof(objName));
-
-                    char addrBuf[16]; snprintf(addrBuf, sizeof(addrBuf), "0x%08X", (DWORD)u);
-                    objects.push_back({
-                        {"unit_id", (int)u->dwUnitId},
-                        {"class_id", (int)u->dwTxtFileNo},
-                        {"name", objName[0] ? objName : "?"},
-                        {"distance", dist},
-                        {"position", {{"x", ux}, {"y", uy}}},
-                        {"mode", (int)u->dwMode}
-                    });
+                            if (maxDist <= 0 || dist <= maxDist) {
+                                char objName[64] = {};
+                                SafeGetUnitName(u, objName, sizeof(objName));
+                                objects.push_back({
+                                    {"unit_id", (int)u->dwUnitId},
+                                    {"class_id", (int)u->dwTxtFileNo},
+                                    {"name", objName[0] ? objName : "?"},
+                                    {"distance", dist},
+                                    {"position", {{"x", ux}, {"y", uy}}},
+                                    {"mode", (int)u->dwMode}
+                                });
+                            }
+                        }
+                        u = u->pListNext;
+                    }
                 }
             }
-            // Sort by distance
             std::sort(objects.begin(), objects.end(),
                 [](const json& a, const json& b) { return a["distance"] < b["distance"]; });
 
             json info = {{"count", objects.size()}, {"objects", objects}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "walk_to") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int x = arguments.value("x", 0);
+            int y = arguments.value("y", 0);
+            bool run = arguments.value("run", true);
+
+            BYTE packet[5] = {};
+            packet[0] = run ? 0x03 : 0x01; // 0x03=run, 0x01=walk
+            *(WORD*)&packet[1] = (WORD)x;
+            *(WORD*)&packet[3] = (WORD)y;
+            D2NET_SendPacket(5, 1, packet);
+
+            // Get current position for response
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            int cx = 0, cy = 0;
+            if (pPlayer && pPlayer->pPath) {
+                cx = pPlayer->pPath->xPos;
+                cy = pPlayer->pPath->yPos;
+            }
+            int dx = x - cx, dy = y - cy;
+            int dist = (int)sqrt((double)(dx*dx + dy*dy));
+
+            json info = {
+                {"status", run ? "running" : "walking"},
+                {"target", {{"x", x}, {"y", y}}},
+                {"current", {{"x", cx}, {"y", cy}}},
+                {"distance", dist}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "sell_item") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            DWORD itemId = arguments.value("item_id", (DWORD)0);
+            DWORD npcId = arguments.value("npc_id", (DWORD)0);
+
+            // Sell packet: 0x33, npc_id(4), item_id(4), tab(4), cost(4) = 17 bytes
+            BYTE packet[17] = {};
+            packet[0] = 0x33;
+            *(DWORD*)&packet[1] = npcId;
+            *(DWORD*)&packet[5] = itemId;
+            *(DWORD*)&packet[9] = 0;  // tab (0 = default)
+            *(DWORD*)&packet[13] = 0; // cost (0 = server determines)
+            D2NET_SendPacket(17, 1, packet);
+
+            json info = {{"status", "sell_sent"}, {"item_id", itemId}, {"npc_id", npcId}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
@@ -2472,7 +2558,8 @@ namespace {
                                 isStash = (strstr(objName, "tash") || strstr(objName, "Bank") || strstr(objName, "bank"));
                             }
                             if (isStash && u->pPath) {
-                                int ux = u->pPath->xPos, uy = u->pPath->yPos;
+                                ObjectPath* op = (ObjectPath*)u->pPath;
+                                int ux = (int)op->dwPosX, uy = (int)op->dwPosY;
                                 int dx = ux - px, dy = uy - py;
                                 int dist = (int)sqrt((double)(dx*dx + dy*dy));
                                 if (dist < bestDist) {
