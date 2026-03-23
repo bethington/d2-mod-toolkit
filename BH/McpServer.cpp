@@ -452,6 +452,12 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "is_panel_open"},
+            {"description", "Check if stash/trade/cube panel is open. Returns panel type and state."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+
+        tools.push_back({
             {"name", "click_control"},
             {"description", "Click a UI control by index (calls OnPress directly). Works at menu screens without foreground focus. Use get_controls to find indices."},
             {"inputSchema", {
@@ -2577,6 +2583,24 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", "No stash found nearby. Are you in town?"}}}}, {"isError", true}};
             }
 
+            // Helper: check if stash panel is open
+            auto isStashOpen = []() -> bool {
+                HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+                if (!hPD2) return false;
+                DWORD* pPtr = (DWORD*)((DWORD)hPD2 + 0x00410688);
+                if (!*pPtr) return false;
+                return *((DWORD*)*pPtr) == 0x0C;
+            };
+
+            // If already open, just return success
+            if (isStashOpen()) {
+                char objName[64] = {};
+                SafeGetUnitName(stash, objName, sizeof(objName));
+                json info = {{"status", "already_open"}, {"stash_id", (int)stash->dwUnitId},
+                             {"stash_name", objName}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+
             // Send interact packet — auto-walks and opens
             BYTE packet[9] = {};
             packet[0] = 0x13;
@@ -2584,15 +2608,23 @@ namespace {
             *(DWORD*)&packet[5] = stash->dwUnitId;
             D2NET_SendPacket(9, 1, packet);
 
+            // Wait for stash to actually open (up to 5 seconds)
+            bool opened = false;
+            for (int wait = 0; wait < 25; wait++) {
+                Sleep(200);
+                if (isStashOpen()) { opened = true; break; }
+            }
+
             char objName[64] = {};
             SafeGetUnitName(stash, objName, sizeof(objName));
 
             json info = {
-                {"status", "interact_sent"},
+                {"status", opened ? "opened" : "interact_sent"},
                 {"stash_id", (int)stash->dwUnitId},
                 {"stash_class", (int)stash->dwTxtFileNo},
                 {"stash_name", objName},
-                {"distance", bestDist}
+                {"distance", bestDist},
+                {"verified", opened}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
@@ -2601,6 +2633,28 @@ namespace {
             // Toggle cube UI panel via SetUIVar
             D2CLIENT_SetUIVar(UI_CUBE, 1, 0);
             return {{"content", {{{"type", "text"}, {"text", "Cube panel toggled"}}}}};
+        }
+
+        if (name == "is_panel_open") {
+            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+            int panelState = 0;
+            if (hPD2) {
+                DWORD* pPtr = (DWORD*)((DWORD)hPD2 + 0x00410688);
+                if (*pPtr) panelState = *((DWORD*)*pPtr);
+            }
+            const char* panelName = "none";
+            if (panelState == 0x0C) panelName = "stash";
+            else if (panelState == 0x0D) panelName = "trade";
+            else if (panelState == 0x01) panelName = "inventory";
+            else if (panelState > 0) panelName = "other";
+
+            json info = {
+                {"panel", panelName},
+                {"panel_state", panelState},
+                {"stash_open", panelState == 0x0C},
+                {"trade_open", panelState == 0x0D}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "close_panels") {

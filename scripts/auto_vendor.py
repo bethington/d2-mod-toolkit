@@ -198,21 +198,20 @@ class AutoVendor:
         """Evaluate and sell vendor-worthy items from a stash tab."""
         print(f"\n=== AUTO-VENDOR: Stash Tab {tab} ===\n")
 
-        # Walk to stash and open it
-        if not dry_run:
-            objects = self.mcp.call("get_nearby_objects", {"max_distance": 100})
-            stash = None
-            for o in objects.get("objects", []):
-                if "stash" in o.get("name", "").lower() or o.get("class_id") == 267:
-                    stash = o
-                    break
-            if stash:
-                self.mcp.call("walk_to", {"x": stash["position"]["x"], "y": stash["position"]["y"]})
-                time.sleep(2)
-            self.mcp.call("open_stash")
+        # Walk to stash and open it (needed for both dry-run and live)
+        objects = self.mcp.call("get_nearby_objects", {"max_distance": 100})
+        stash = None
+        for o in objects.get("objects", []):
+            if "stash" in o.get("name", "").lower() or o.get("class_id") == 267:
+                stash = o
+                break
+        if stash:
+            self.mcp.call("walk_to", {"x": stash["position"]["x"], "y": stash["position"]["y"]})
             time.sleep(2)
-            self.mcp.call("switch_stash_tab", {"tab": tab})
-            time.sleep(0.5)
+        self.mcp.call("open_stash")
+        time.sleep(2)
+        self.mcp.call("switch_stash_tab", {"tab": tab})
+        time.sleep(0.5)
 
         # Evaluate items on this tab
         results = self.evaluator.scan_tab(tab)
