@@ -294,8 +294,10 @@ class FarmingLoop:
         hp = unit.get("hp", 0) >> 8
         max_hp = unit.get("max_hp", 0) >> 8
 
-        # Skip dead/no-HP units
-        if max_hp <= 0:
+        # Skip dead units (check raw HP, not shifted)
+        raw_hp = unit.get("hp", 0)
+        raw_max = unit.get("max_hp", 0)
+        if raw_hp <= 0 and raw_max <= 0:
             return False
 
         # Skip town NPCs (name = "an evil force" with 0 or low HP, or known NPC names)
