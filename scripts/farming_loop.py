@@ -100,16 +100,47 @@ class FarmingLoop:
                     self.SKILL_TELEPORT = s["skill_id"]
                     break
 
-        # Find main combat skill: highest base_level skill in primary tree
-        primary = skills.get("primary_tree", "Unknown")
-        primary_skills = [s for s in all_skills if s["tree"] == primary and s["base_level"] >= 10]
-        if primary_skills:
-            self.SKILL_COMBAT = max(primary_skills, key=lambda s: s["total_level"])["skill_id"]
-        else:
-            # Fallback: highest total_level skill that isn't Teleport
-            non_tp = [s for s in all_skills if s["skill_id"] != self.SKILL_TELEPORT and s["base_level"] >= 5]
-            if non_tp:
-                self.SKILL_COMBAT = max(non_tp, key=lambda s: s["total_level"])["skill_id"]
+        # Find main combat skill by TESTING each candidate
+        # Some skills show high level but are passives (don't deal damage)
+        candidates = [s for s in all_skills if s["base_level"] >= 10
+                      and s["skill_id"] != self.SKILL_TELEPORT]
+        # Sort by total_level descending
+        candidates.sort(key=lambda s: s["total_level"], reverse=True)
+
+        # Try to find a nearby monster to test on
+        units = self.mcp.call("get_nearby_units", {"max_distance": 100})
+        test_monsters = [u for u in units.get("units", []) if u.get("type") == "monster"
+                        and not u.get("dead") and u.get("hp", 0) > 0
+                        and u.get("class_id", 0) not in {271, 338, 359, 560, 561}
+                        and u.get("name", "") not in ("an evil force",)]
+
+        if test_monsters and candidates:
+            target = min(test_monsters, key=lambda m: m["distance"])
+            # Teleport close
+            if self.SKILL_TELEPORT:
+                self.mcp.call("switch_skill", {"skill_id": self.SKILL_TELEPORT})
+                time.sleep(0.1)
+                self.mcp.call("cast_skill", {"x": target["position"]["x"], "y": target["position"]["y"]})
+                time.sleep(0.4)
+
+            for cand in candidates[:5]:
+                sid = cand["skill_id"]
+                self.mcp.call("switch_skill", {"skill_id": sid})
+                time.sleep(0.2)
+                hp_before = target.get("hp", 0)
+                for _ in range(5):
+                    self.mcp.call("cast_skill", {"x": target["position"]["x"], "y": target["position"]["y"]})
+                    time.sleep(0.2)
+                # Check HP
+                units2 = self.mcp.call("get_nearby_units", {"max_distance": 60})
+                m2 = [u for u in units2.get("units", []) if u.get("unit_id") == target["unit_id"]]
+                if not m2 or m2[0].get("hp", 0) < hp_before:
+                    self.SKILL_COMBAT = sid
+                    break
+
+        if not self.SKILL_COMBAT and candidates:
+            # Fallback: use highest level candidate
+            self.SKILL_COMBAT = candidates[0]["skill_id"]
 
         print(f"  Skills: Teleport={self.SKILL_TELEPORT}, Combat={self.SKILL_COMBAT}")
         return self.SKILL_TELEPORT is not None and self.SKILL_COMBAT is not None
@@ -345,25 +376,27 @@ class FarmingLoop:
                     break
                 continue
 
-            # Switch to combat skill and attack monsters
-            self.switch_to_combat()
-            for target in monsters[:3]:  # attack up to 3 nearby
+            # Attack monsters: teleport close then cast
+            for target in monsters[:5]:
                 immunities = target.get("immunities", [])
                 immune_str = f" IMMUNE:{','.join(immunities)}" if immunities else ""
-                hp = target.get("hp", 0) >> 8
+                hp = target.get("hp", 0)
 
-                # Skip lightning immunes (we're a Lightning Sorc)
                 if "lightning" in immunities:
                     continue
 
+                # Teleport on top of monster
+                self.teleport_to(target["position"]["x"], target["position"]["y"])
+                time.sleep(0.2)
+
+                # Switch to combat and attack at monster position
+                self.switch_to_combat()
                 print(f"    >> {target['name']} HP:{hp}{immune_str}")
+                for cast in range(8):
+                    self.mcp.call("cast_skill", {"x": target["position"]["x"], "y": target["position"]["y"]})
+                    time.sleep(0.2)
 
-                # Cast right-click skill on the monster (Chain Lightning)
-                for cast in range(3):
-                    self.mcp.call("cast_skill", {"unit_id": target["unit_id"], "unit_type": 1})
-                    time.sleep(0.3)
-
-                total_killed += 1  # approximate
+                total_killed += 1
 
             # Safety: chicken if HP low
             hp_pct = self.get_hp_pct()
