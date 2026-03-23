@@ -229,15 +229,20 @@ def navigate_to_game(character=None):
 
         elif screen == "char_select":
             if character:
-                # Use select_character tool which probes each slot
-                result = mcp_call("select_character", {"name": character})
-                if result and result.get("status") == "selected":
-                    print(f"  Selected '{character}' at slot {result.get('slot')}")
+                # Use launch_character to directly select and launch by name
+                result = mcp_call("launch_character", {"name": character})
+                if result and result.get("status") == "launched":
+                    print(f"  Launched '{result.get('character')}' (index {result.get('index')})")
+                    time.sleep(15)  # wait for game to load
+                    return True  # skip remaining navigation
                 else:
-                    print(f"  Could not find '{character}', using default")
-                time.sleep(1)
-            _click_ok_button(ctrl_list)
-            time.sleep(3)
+                    print(f"  launch_character failed: {result}")
+                    # Fallback to OK button
+                    _click_ok_button(ctrl_list)
+                    time.sleep(3)
+            else:
+                _click_ok_button(ctrl_list)
+                time.sleep(3)
 
         elif screen == "difficulty":
             _click_highest_difficulty(ctrl_list)
