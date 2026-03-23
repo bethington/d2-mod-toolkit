@@ -458,6 +458,18 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "select_character"},
+            {"description", "Select a character by name on the character select screen. Searches all textbox controls for the name, then simulates a mouse click at that slot's coordinates."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Character name to find and select"}}}
+                }},
+                {"required", json::array({"name"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "click_control"},
             {"description", "Click a UI control by index (calls OnPress directly). Works at menu screens without foreground focus. Use get_controls to find indices."},
             {"inputSchema", {
@@ -1637,6 +1649,147 @@ namespace {
             }
             json info = {{"count", controls.size()}, {"controls", controls}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "select_character") {
+            std::string charName = arguments.value("name", "");
+            if (charName.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "name required"}}}}, {"isError", true}};
+            }
+
+            HWND hWnd = FindWindow(nullptr, "Diablo II");
+            if (!hWnd) {
+                return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
+            }
+
+            // Strategy: click each character slot, read the header text to see which
+            // character was selected, stop when we find the target.
+            // D2's char select has misaligned text rendering vs click targets.
+
+            // Collect all wide textbox slots (200px+ wide, y >= 150)
+            struct Slot { int x, y, w, h; };
+            Slot slots[16];
+            int slotCount = 0;
+            Control* pCtrl = *p_D2WIN_FirstControl;
+            while (pCtrl && slotCount < 16) {
+                if (pCtrl->dwType == 4 && pCtrl->dwPosY >= 150 && pCtrl->dwSizeX > 100 && pCtrl->OnPress) {
+                    slots[slotCount++] = { (int)pCtrl->dwPosX, (int)pCtrl->dwPosY,
+                                           (int)pCtrl->dwSizeX, (int)pCtrl->dwSizeY };
+                }
+                pCtrl = pCtrl->pNext;
+            }
+
+            // Find header textbox (y < 150)
+            Control* pHeader = nullptr;
+            pCtrl = *p_D2WIN_FirstControl;
+            while (pCtrl) {
+                if (pCtrl->dwType == 4 && pCtrl->dwPosY < 150) {
+                    pHeader = pCtrl;
+                    break;
+                }
+                pCtrl = pCtrl->pNext;
+            }
+
+            // Helper to read header text
+            struct HeaderReader {
+                char text[256];
+                static void Read(Control* h, HeaderReader& out) {
+                    out.text[0] = 0;
+                    if (!h) return;
+                    __try {
+                        TextBox* tb = (TextBox*)h;
+                        ControlText* ct = tb->pFirstText;
+                        while (ct) {
+                            for (int f = 0; f < 5; f++) {
+                                if (ct->wText[f]) {
+                                    WideCharToMultiByte(CP_UTF8, 0, ct->wText[f], -1,
+                                        out.text, 255, nullptr, nullptr);
+                                    if (out.text[0]) return;
+                                }
+                            }
+                            ct = ct->pNext;
+                        }
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            };
+
+            // Click each slot and check header
+            std::string nameLower = charName;
+            for (auto& c : nameLower) c = tolower(c);
+
+            SetForegroundWindow(hWnd);
+            Sleep(200);
+
+            for (int i = 0; i < slotCount; i++) {
+                int cx = slots[i].x + slots[i].w / 2;
+                int cy = slots[i].y + slots[i].h / 2;
+
+                POINT pt = { (LONG)cx, (LONG)cy };
+                ClientToScreen(hWnd, &pt);
+                SetCursorPos(pt.x, pt.y);
+                Sleep(50);
+
+                INPUT inputs[2] = {};
+                inputs[0].type = INPUT_MOUSE;
+                inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+                inputs[1].type = INPUT_MOUSE;
+                inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+                SendInput(1, &inputs[0], sizeof(INPUT));
+                Sleep(50);
+                SendInput(1, &inputs[1], sizeof(INPUT));
+                Sleep(300);
+
+                // Read header to see what got selected
+                HeaderReader hr;
+                HeaderReader::Read(pHeader, hr);
+
+                // Also read ALL header text lines for name matching
+                std::string headerText = hr.text;
+                // Check all text lines in header
+                bool found = false;
+                if (pHeader) {
+                    struct FullRead {
+                        char lines[10][128];
+                        int count;
+                        static void Read(Control* p, FullRead& out) {
+                            out.count = 0;
+                            __try {
+                                TextBox* t = (TextBox*)p;
+                                ControlText* ct = t->pFirstText;
+                                while (ct && out.count < 10) {
+                                    for (int f = 0; f < 5; f++) {
+                                        if (ct->wText[f] && out.count < 10) {
+                                            WideCharToMultiByte(CP_UTF8, 0, ct->wText[f], -1,
+                                                out.lines[out.count], 127, nullptr, nullptr);
+                                            if (out.lines[out.count][0]) out.count++;
+                                        }
+                                    }
+                                    ct = ct->pNext;
+                                }
+                            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                        }
+                    };
+                    FullRead fr;
+                    FullRead::Read(pHeader, fr);
+                    for (int j = 0; j < fr.count; j++) {
+                        std::string line = fr.lines[j];
+                        for (auto& c : line) c = tolower(c);
+                        if (line.find(nameLower) != std::string::npos) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (found) {
+                    json info = {{"status", "selected"}, {"character", charName},
+                                 {"slot", i}, {"click_x", cx}, {"click_y", cy},
+                                 {"header", headerText}};
+                    return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+                }
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", "Character '" + charName + "' not found after clicking all " + std::to_string(slotCount) + " slots"}}}}, {"isError", true}};
         }
 
         // Click a control by index (calls OnPress directly — works at menu, no foreground needed)

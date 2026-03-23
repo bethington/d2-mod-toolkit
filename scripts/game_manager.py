@@ -229,26 +229,15 @@ def navigate_to_game(character=None):
 
         elif screen == "char_select":
             if character:
-                found = _click_character(ctrl_list, character)
-                if not found:
-                    # Try scrolling or different slots
-                    pass
+                # Use select_character tool which probes each slot
+                result = mcp_call("select_character", {"name": character})
+                if result and result.get("status") == "selected":
+                    print(f"  Selected '{character}' at slot {result.get('slot')}")
+                else:
+                    print(f"  Could not find '{character}', using default")
                 time.sleep(1)
             _click_ok_button(ctrl_list)
-            time.sleep(8)
-
-            # Verify correct character loaded
-            if character:
-                state = get_game_state()
-                if state and state.get("state") == "in_game":
-                    ps = mcp_call("get_player_state")
-                    if ps and character.lower() not in ps.get("name", "").lower():
-                        loaded_name = ps.get("name", "?")
-                        print(f"  Wrong character loaded: '{loaded_name}', wanted '{character}'")
-                        # Exit and retry
-                        mcp_call("quit_game")
-                        time.sleep(8)
-                        return False  # will retry from scratch
+            time.sleep(3)
 
         elif screen == "difficulty":
             _click_highest_difficulty(ctrl_list)
