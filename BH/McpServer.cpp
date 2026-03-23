@@ -3064,15 +3064,17 @@ namespace {
             Sleep(500); // brief wait for interact to process
 
             // Step 2: Send waypoint destination packet
-            // Format: {0x49, DWORD wp_data, DWORD area_id} = 9 bytes
-            // wp_data = waypoint unit ID, area_id = destination area number
             {
                 BYTE pkt[9] = {};
                 pkt[0] = 0x49;
                 *(DWORD*)&pkt[1] = wpId;
-                *(DWORD*)&pkt[5] = dest; // dest is the AREA ID (1=Rogue, 109=Harrogath, etc.)
+                *(DWORD*)&pkt[5] = dest;
                 D2NET_SendPacket(9, 1, pkt);
             }
+
+            // Step 3: Close waypoint panel via SetUIVar(UI_WPMENU=0x14, 0, 0)
+            Sleep(500);
+            D2CLIENT_SetUIVar(0x14, 0, 0);
 
             // Waypoint destination names
             static const char* wpNames[] = {
@@ -3322,8 +3324,13 @@ namespace {
                 DWORD* pPtr = (DWORD*)((DWORD)hPD2 + 0x00410688);
                 if (*pPtr) panelState = *((DWORD*)*pPtr);
             }
+
+            // Check waypoint panel via g_dwData_add0
+            bool waypointOpen = (*(DWORD*)0x6FBAADD0) != 0;
+
             const char* panelName = "none";
-            if (panelState == 0x0C) panelName = "stash";
+            if (waypointOpen) panelName = "waypoint";
+            else if (panelState == 0x0C) panelName = "stash";
             else if (panelState == 0x0D) panelName = "trade";
             else if (panelState == 0x01) panelName = "inventory";
             else if (panelState > 0) panelName = "other";
@@ -3332,13 +3339,18 @@ namespace {
                 {"panel", panelName},
                 {"panel_state", panelState},
                 {"stash_open", panelState == 0x0C},
-                {"trade_open", panelState == 0x0D}
+                {"trade_open", panelState == 0x0D},
+                {"waypoint_open", waypointOpen}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "close_panels") {
             D2CLIENT_CloseInteract();
+            // Also close waypoint panel which uses a separate state
+            if (*(DWORD*)0x6FBAADD0 != 0) {
+                D2CLIENT_SetUIVar(0x14, 0, 0); // UI_WPMENU = 0x14
+            }
             return {{"content", {{{"type", "text"}, {"text", "Panels closed"}}}}};
         }
 
