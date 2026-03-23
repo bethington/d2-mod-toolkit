@@ -1,19 +1,20 @@
 """Farming Loop — Automated farming for PD2 Sorceress.
 
 Teleports to farming area, kills monsters, picks up loot,
-returns to town to vendor/stash, and repeats.
+returns to town to vendor/stash, creates new game, and repeats.
 
 Usage:
-    python farming_loop.py                        # Default: farm Countess (area 25)
-    python farming_loop.py --area 2               # Farm Cold Plains
-    python farming_loop.py --area 2 --runs 5      # 5 runs
-    python farming_loop.py --dry-run              # Show plan without acting
+    python farming_loop.py --area 35 --runs 5           # 5 runs in Catacombs
+    python farming_loop.py --area 35 --runs 10 --new-game  # New game each run
+    python farming_loop.py --area 35 --duration 60      # 60s per run
+    python farming_loop.py --dry-run --area 35           # Show plan only
 
-Requires: game running in town, MCP on port 21337.
+Requires: game running in town (or use --new-game to auto-start).
 """
 
 import json
 import sys
+import os
 import time
 import argparse
 import math
@@ -73,6 +74,71 @@ class FarmingLoop:
         self.stats = {"runs": 0, "kills": 0, "items_found": 0, "items_vendored": 0,
                       "deaths": 0, "start_time": time.time()}
 
+    def detect_skills(self):
+        """Auto-detect Teleport and main combat skill from character's skill list."""
+        skills = self.mcp.call("get_skills")
+        all_skills = skills.get("skills", [])
+
+        # Find Teleport: test each 1-point skill by casting and checking movement
+        # First try known PD2 Teleport IDs
+        for sid in [394, 54, 52]:
+            if any(s["skill_id"] == sid for s in all_skills):
+                self.SKILL_TELEPORT = sid
+                break
+
+        # If not found, detect by testing (expensive but reliable)
+        if not self.SKILL_TELEPORT:
+            one_pointers = [s for s in all_skills if s["base_level"] == 1]
+            for s in one_pointers:
+                self.mcp.call("switch_skill", {"skill_id": s["skill_id"]})
+                time.sleep(0.2)
+                pos1 = self.get_position()
+                self.mcp.call("cast_skill", {"x": pos1[0] + 15, "y": pos1[1] + 10})
+                time.sleep(0.5)
+                pos2 = self.get_position()
+                if abs(pos2[0] - pos1[0]) + abs(pos2[1] - pos1[1]) > 5:
+                    self.SKILL_TELEPORT = s["skill_id"]
+                    break
+
+        # Find main combat skill: highest base_level skill in primary tree
+        primary = skills.get("primary_tree", "Unknown")
+        primary_skills = [s for s in all_skills if s["tree"] == primary and s["base_level"] >= 10]
+        if primary_skills:
+            self.SKILL_COMBAT = max(primary_skills, key=lambda s: s["total_level"])["skill_id"]
+        else:
+            # Fallback: highest total_level skill that isn't Teleport
+            non_tp = [s for s in all_skills if s["skill_id"] != self.SKILL_TELEPORT and s["base_level"] >= 5]
+            if non_tp:
+                self.SKILL_COMBAT = max(non_tp, key=lambda s: s["total_level"])["skill_id"]
+
+        print(f"  Skills: Teleport={self.SKILL_TELEPORT}, Combat={self.SKILL_COMBAT}")
+        return self.SKILL_TELEPORT is not None and self.SKILL_COMBAT is not None
+
+    def create_new_game(self, character="combustion"):
+        """Exit current game and create a new one (resets monsters)."""
+        import subprocess
+        print("  Creating new game...")
+
+        # Quit game
+        self.mcp.call("quit_game")
+        time.sleep(8)
+
+        # Relaunch via game_manager
+        result = subprocess.run(
+            ["python", "game_manager.py", "--character", character, "--no-deploy"],
+            capture_output=True, text=True, timeout=120,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+
+        if "Ready!" in result.stdout:
+            print("  New game created")
+            # Re-detect skills (new game = fresh state)
+            time.sleep(2)
+            return True
+        else:
+            print(f"  Failed to create new game")
+            return False
+
     def get_state(self):
         """Get current game state."""
         return self.mcp.call("get_game_state")
@@ -96,9 +162,9 @@ class FarmingLoop:
                 return o
         return None
 
-    # PD2 Skill IDs (character-specific — detected or configured)
-    SKILL_TELEPORT = 394   # PD2 Teleport
-    SKILL_COMBAT = 47      # Main combat skill (Chain Lightning/Lightning)
+    # PD2 Skill IDs (auto-detected or configured)
+    SKILL_TELEPORT = None
+    SKILL_COMBAT = None
 
     def teleport_to(self, x, y):
         """Teleport to a location using Teleport skill."""
@@ -256,7 +322,7 @@ class FarmingLoop:
 
         while time.time() - start < max_duration:
             # Get nearby monsters
-            units = self.mcp.call("get_nearby_units", {"max_distance": 40})
+            units = self.mcp.call("get_nearby_units", {"max_distance": 60})
             monsters = [u for u in units.get("units", []) if self._is_attackable(u)]
 
             if not monsters:
@@ -315,16 +381,53 @@ class FarmingLoop:
 
         return total_killed
 
+    # Items worth picking up (by name substring, case-insensitive)
+    PICKUP_NAMES = [
+        "unique", "set",           # quality keywords in colored names
+        "rune", "key",             # always valuable
+        "charm", "jewel", "ring", "amulet",  # small valuables
+        "essence", "token",        # PD2 materials
+        "voidstone", "vision", "pandemonium", "talisman",
+    ]
+
+    # Items to skip picking up
+    SKIP_NAMES = [
+        "gold", "potion", "scroll", "arrow", "bolt",
+        "tome", "ear",
+    ]
+
+    def _should_pickup(self, item_name):
+        """Check if an item is worth picking up by name."""
+        name = item_name.lower()
+        # Remove color codes
+        while "ÿc" in name:
+            idx = name.find("ÿc")
+            name = name[:idx] + name[idx+3:]
+
+        # Skip junk
+        if any(s in name for s in self.SKIP_NAMES):
+            return False
+
+        # Always pick up valuables
+        if any(s in name for s in self.PICKUP_NAMES):
+            return True
+
+        # Pick up equipment (might be good)
+        return True  # for now, pick up everything that isn't junk
+
     def pick_up_loot(self):
-        """Pick up items on the ground."""
-        units = self.mcp.call("get_nearby_units", {"max_distance": 20})
+        """Pick up valuable items on the ground."""
+        units = self.mcp.call("get_nearby_units", {"max_distance": 30})
         items = [u for u in units.get("units", []) if u.get("type") == "item"]
 
         picked = 0
-        for item in items[:5]:  # limit to 5 items per sweep
-            self.mcp.call("pickup_item", {"item_id": item["unit_id"]})
-            time.sleep(0.3)
-            picked += 1
+        for item in items[:8]:
+            name = item.get("name", "")
+            if self._should_pickup(name):
+                self.mcp.call("pickup_item", {"item_id": item["unit_id"]})
+                time.sleep(0.3)
+                picked += 1
+                print(f"    Picked up: {name}")
 
         return picked
 
@@ -439,9 +542,11 @@ class FarmingLoop:
 
 def main():
     parser = argparse.ArgumentParser(description="Farming Loop")
-    parser.add_argument("--area", type=int, default=2, help="Area ID to farm (default: 2=Cold Plains)")
+    parser.add_argument("--area", type=int, default=35, help="Area ID to farm (default: 35=Catacombs Level 2)")
     parser.add_argument("--runs", type=int, default=3, help="Number of runs (default: 3)")
     parser.add_argument("--duration", type=int, default=60, help="Farm duration per run in seconds (default: 60)")
+    parser.add_argument("--new-game", action="store_true", help="Create new game each run (resets monsters)")
+    parser.add_argument("--character", type=str, default="combustion", help="Character name for new game creation")
     parser.add_argument("--dry-run", action="store_true", help="Show plan only")
     parser.add_argument("--url", default="http://127.0.0.1:21337")
     args = parser.parse_args()
@@ -457,6 +562,8 @@ def main():
     area_name = WAYPOINT_AREAS.get(args.area, f"Area {args.area}")
     print(f"Farming: {area_name} (area {args.area})")
     print(f"Runs: {args.runs}, Duration: {args.duration}s per run")
+    if args.new_game:
+        print(f"New game each run: character={args.character}")
 
     if args.dry_run:
         print("\n[DRY RUN] Would farm:")
@@ -465,14 +572,30 @@ def main():
         print(f"  3. Pick up loot")
         print(f"  4. Return to town")
         print(f"  5. Vendor junk")
-        print(f"  6. Repeat {args.runs} times")
+        if args.new_game:
+            print(f"  6. Create new game (reset monsters)")
+        print(f"  7. Repeat {args.runs} times")
         return
+
+    # Auto-detect skills
+    print("Detecting skills...")
+    if not farm.detect_skills():
+        print("ERROR: Could not detect Teleport/Combat skills")
+        sys.exit(1)
 
     for run in range(args.runs):
         success = farm.run_single(args.area, farm_duration=args.duration)
         if not success:
             print("Run failed, stopping")
             break
+
+        # Create new game for next run (resets monsters)
+        if args.new_game and run < args.runs - 1:
+            if not farm.create_new_game(args.character):
+                print("Failed to create new game, stopping")
+                break
+            # Re-detect skills in new game
+            farm.detect_skills()
 
     farm.print_stats()
 
