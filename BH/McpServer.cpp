@@ -771,6 +771,19 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "switch_skill"},
+            {"description", "Switch the active skill on left or right click. Use get_skills to find skill IDs."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"skill_id", {{"type", "integer"}, {"description", "Skill ID to select"}}},
+                    {"left", {{"type", "boolean"}, {"description", "Set as left-click skill (default false = right-click)"}}}
+                }},
+                {"required", json::array({"skill_id"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "cast_skill"},
             {"description", "Cast the currently selected skill at a location or on a unit. Use right-click skill by default."},
             {"inputSchema", {
@@ -2728,6 +2741,33 @@ namespace {
             if (!met) {
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}, {"isError", true}};
             }
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "switch_skill") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int skillId = arguments.value("skill_id", 0);
+            bool left = arguments.value("left", false);
+
+            // Packet 0x3C: {0x3C, WORD skill_id, 0x00, BYTE side, 0xFF, 0xFF, 0xFF, 0xFF}
+            BYTE packet[9] = {};
+            packet[0] = 0x3C;
+            *(WORD*)&packet[1] = (WORD)skillId;
+            packet[3] = 0x00;
+            packet[4] = left ? 0x80 : 0x00;
+            packet[5] = 0xFF;
+            packet[6] = 0xFF;
+            packet[7] = 0xFF;
+            packet[8] = 0xFF;
+            D2NET_SendPacket(9, 1, packet);
+
+            json info = {
+                {"status", "switched"},
+                {"skill_id", skillId},
+                {"side", left ? "left" : "right"}
+            };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 

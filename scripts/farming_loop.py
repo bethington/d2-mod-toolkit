@@ -96,10 +96,21 @@ class FarmingLoop:
                 return o
         return None
 
+    # PD2 Skill IDs (character-specific — detected or configured)
+    SKILL_TELEPORT = 394   # PD2 Teleport
+    SKILL_COMBAT = 47      # Main combat skill (Chain Lightning/Lightning)
+
     def teleport_to(self, x, y):
-        """Teleport (right-click skill) to a location."""
+        """Teleport to a location using Teleport skill."""
+        self.mcp.call("switch_skill", {"skill_id": self.SKILL_TELEPORT})
+        time.sleep(0.1)
         self.mcp.call("cast_skill", {"x": x, "y": y})
         time.sleep(0.3)
+
+    def switch_to_combat(self):
+        """Switch right-click to combat skill."""
+        self.mcp.call("switch_skill", {"skill_id": self.SKILL_COMBAT})
+        time.sleep(0.1)
 
     def ensure_mobile(self):
         """Check if character can move; if stuck, try to unstick."""
@@ -266,7 +277,8 @@ class FarmingLoop:
                     break
                 continue
 
-            # Attack monsters in range
+            # Switch to combat skill and attack monsters
+            self.switch_to_combat()
             for target in monsters[:3]:  # attack up to 3 nearby
                 immunities = target.get("immunities", [])
                 immune_str = f" IMMUNE:{','.join(immunities)}" if immunities else ""
