@@ -1,0 +1,1987 @@
+{
+  "summary": {
+    "total_actions": 125,
+    "successful_moves": 38,
+    "tab_switches": 38,
+    "swaps": 0,
+    "wasted": 0,
+    "failures": 0,
+    "elapsed_sec": 0.0,
+    "moves_per_min": 3800.0
+  },
+  "actions": [
+    {
+      "action": "move",
+      "item_id": 530,
+      "item_name": "Large Charm",
+      "from_tab": 5,
+      "from_pos": [
+        5,
+        4
+      ],
+      "to_tab": 1,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 505,
+      "item_name": "Tiara",
+      "from_tab": 5,
+      "from_pos": [
+        6,
+        9
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 508,
+      "item_name": "Aegis",
+      "from_tab": 5,
+      "from_pos": [
+        6,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 487,
+      "item_name": "Corona",
+      "from_tab": 5,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 498,
+      "item_name": "Shako",
+      "from_tab": 5,
+      "from_pos": [
+        4,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 504,
+      "item_name": "War Hat",
+      "from_tab": 5,
+      "from_pos": [
+        4,
+        2
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 510,
+      "item_name": "Shillelagh",
+      "from_tab": 5,
+      "from_pos": [
+        4,
+        4
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 520,
+      "item_name": "Hierophant Trophy",
+      "from_tab": 5,
+      "from_pos": [
+        2,
+        3
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 521,
+      "item_name": "Zombie Head",
+      "from_tab": 5,
+      "from_pos": [
+        0,
+        5
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 528,
+      "item_name": "Tulwar",
+      "from_tab": 5,
+      "from_pos": [
+        0,
+        7
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 6,
+      "item_name": "Zakarum Shield",
+      "from_tab": 6,
+      "from_pos": [
+        0,
+        10
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 13,
+      "item_name": "Hunter's Bow",
+      "from_tab": 6,
+      "from_pos": [
+        2,
+        4
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        6,
+        13
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 6,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 3,
+      "item_name": "Bramble Mitts",
+      "from_tab": 6,
+      "from_pos": [
+        0,
+        3
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 12,
+      "item_name": "Hierophant Trophy",
+      "from_tab": 6,
+      "from_pos": [
+        2,
+        2
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 34,
+      "item_name": "Cantor Trophy",
+      "from_tab": 6,
+      "from_pos": [
+        8,
+        8
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 42,
+      "item_name": "Shako",
+      "from_tab": 6,
+      "from_pos": [
+        4,
+        13
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 76,
+      "item_name": "Shadow Plate",
+      "from_tab": 7,
+      "from_pos": [
+        6,
+        10
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        2,
+        12
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 7,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 85,
+      "item_name": "Sacred Armor",
+      "from_tab": 7,
+      "from_pos": [
+        8,
+        12
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        8,
+        12
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 7,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 79,
+      "item_name": "Ogre Maul",
+      "from_tab": 7,
+      "from_pos": [
+        8,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 50,
+      "item_name": "War Hat",
+      "from_tab": 7,
+      "from_pos": [
+        0,
+        7
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 81,
+      "item_name": "Avenger Guard",
+      "from_tab": 7,
+      "from_pos": [
+        8,
+        6
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 569,
+      "item_name": "Serpentskin Armor",
+      "from_tab": 8,
+      "from_pos": [
+        4,
+        6
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        13
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 535,
+      "item_name": "Serpentskin Armor",
+      "from_tab": 8,
+      "from_pos": [
+        6,
+        3
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 533,
+      "item_name": "Archon Plate",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        2
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 563,
+      "item_name": "Embossed Plate",
+      "from_tab": 8,
+      "from_pos": [
+        6,
+        0
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 557,
+      "item_name": "Gnarled Staff",
+      "from_tab": 8,
+      "from_pos": [
+        6,
+        6
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        8,
+        12
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 589,
+      "item_name": "Flying Axe",
+      "from_tab": 8,
+      "from_pos": [
+        7,
+        8
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        6,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 590,
+      "item_name": "Tomb Wand",
+      "from_tab": 8,
+      "from_pos": [
+        8,
+        8
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        7,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 558,
+      "item_name": "Monarch",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        5
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 556,
+      "item_name": "Boneweave",
+      "from_tab": 8,
+      "from_pos": [
+        2,
+        4
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 582,
+      "item_name": "Monarch",
+      "from_tab": 8,
+      "from_pos": [
+        8,
+        3
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 576,
+      "item_name": "Berserker Axe",
+      "from_tab": 8,
+      "from_pos": [
+        8,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 549,
+      "item_name": "Grim Shield",
+      "from_tab": 8,
+      "from_pos": [
+        4,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 552,
+      "item_name": "Archon Staff",
+      "from_tab": 8,
+      "from_pos": [
+        2,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 572,
+      "item_name": "Dimensional Shard",
+      "from_tab": 8,
+      "from_pos": [
+        9,
+        6
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 586,
+      "item_name": "Bramble Mitts",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        8
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 562,
+      "item_name": "Corona",
+      "from_tab": 8,
+      "from_pos": [
+        2,
+        7
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 583,
+      "item_name": "Blood Spirit",
+      "from_tab": 8,
+      "from_pos": [
+        7,
+        6
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 534,
+      "item_name": "Aegis",
+      "from_tab": 8,
+      "from_pos": [
+        4,
+        3
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 531,
+      "item_name": "Shako",
+      "from_tab": 8,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 622,
+      "item_name": "Skull Cap",
+      "from_tab": 9,
+      "from_pos": [
+        8,
+        1
+      ],
+      "to_tab": 2,
+      "to_pos": [
+        7,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 2,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 605,
+      "item_name": "Lacquered Plate",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        3
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 595,
+      "item_name": "Dusk Shroud",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        7
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 615,
+      "item_name": "Mage Plate",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        12
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 616,
+      "item_name": "Ornate Plate",
+      "from_tab": 9,
+      "from_pos": [
+        8,
+        3
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 617,
+      "item_name": "Embossed Plate",
+      "from_tab": 9,
+      "from_pos": [
+        8,
+        9
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 618,
+      "item_name": "Ornate Plate",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        0
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 623,
+      "item_name": "Chaos Armor",
+      "from_tab": 9,
+      "from_pos": [
+        8,
+        6
+      ],
+      "to_tab": 5,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 609,
+      "item_name": "Belt",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        13
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        2
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 612,
+      "item_name": "Demonhide Boots",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        4
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        2,
+        4
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 614,
+      "item_name": "Sharkskin Gloves",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        10
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        14
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 620,
+      "item_name": "Sharkskin Boots",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        1
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        2,
+        14
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 598,
+      "item_name": "Sharkskin Belt",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        14
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        2,
+        6
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 611,
+      "item_name": "Sharkskin Belt",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        3
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        6,
+        14
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 613,
+      "item_name": "Demonhide Sash",
+      "from_tab": 9,
+      "from_pos": [
+        6,
+        9
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        8,
+        14
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 6,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 594,
+      "item_name": "Grand Matron Bow",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        3
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 593,
+      "item_name": "Siege Crossbow",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 608,
+      "item_name": "Cryptic Sword",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        10
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 596,
+      "item_name": "Spired Helm",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        10
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 603,
+      "item_name": "Grim Helm",
+      "from_tab": 9,
+      "from_pos": [
+        2,
+        11
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 604,
+      "item_name": "Winged Helm",
+      "from_tab": 9,
+      "from_pos": [
+        2,
+        13
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 606,
+      "item_name": "Death Mask",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        6
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 607,
+      "item_name": "Grand Crown",
+      "from_tab": 9,
+      "from_pos": [
+        4,
+        8
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 625,
+      "item_name": "Grim Helm",
+      "from_tab": 9,
+      "from_pos": [
+        8,
+        13
+      ],
+      "to_tab": 7,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "skip",
+      "note": "no space"
+    },
+    {
+      "action": "move",
+      "item_id": 270,
+      "item_name": "Key",
+      "from_tab": 9,
+      "from_pos": [
+        9,
+        12
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        4,
+        6
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 9,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 298,
+      "item_name": "\u00ffc8Voidstone",
+      "from_tab": 3,
+      "from_pos": [
+        2,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        5,
+        6
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 296,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        6,
+        6
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 297,
+      "item_name": "\u00ffc8Vision of Terror",
+      "from_tab": 3,
+      "from_pos": [
+        1,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        4,
+        7
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 299,
+      "item_name": "\u00ffc8Voidstone",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        1
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        5,
+        7
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 300,
+      "item_name": "\u00ffc8Vision of Terror",
+      "from_tab": 3,
+      "from_pos": [
+        1,
+        1
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        6,
+        7
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 305,
+      "item_name": "\u00ffc8Ancient Bone Fragments",
+      "from_tab": 3,
+      "from_pos": [
+        2,
+        2
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        4,
+        8
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 326,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        9,
+        6
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        5,
+        8
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 330,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        4,
+        5
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        6,
+        8
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 340,
+      "item_name": "\u00ffc8Vision of Terror",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        7,
+        8
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 343,
+      "item_name": "\u00ffc8Pandemonium Talisman",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        7
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        8,
+        8
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 376,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        2,
+        10
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        3,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 397,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        1,
+        4
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        4,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 398,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        1,
+        5
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        5,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 399,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        4,
+        2
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        6,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 400,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        4,
+        3
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        7,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 401,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        4,
+        4
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        8,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 402,
+      "item_name": "\u00ffc4Skeleton Key",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        1
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        9,
+        9
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 403,
+      "item_name": "\u00ffc8Pandemonium Talisman",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        2
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 404,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        3
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        1,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 405,
+      "item_name": "Token of Absolution",
+      "from_tab": 3,
+      "from_pos": [
+        7,
+        3
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        2,
+        10
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 8,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 328,
+      "item_name": "Ear",
+      "from_tab": 3,
+      "from_pos": [
+        4,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        6,
+        1
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "move",
+      "item_id": 362,
+      "item_name": "Ear",
+      "from_tab": 3,
+      "from_pos": [
+        5,
+        9
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        7,
+        1
+      ],
+      "result": "ok"
+    },
+    {
+      "action": "tab_switch",
+      "from_tab": 3,
+      "from_pos": [
+        0,
+        0
+      ],
+      "to_tab": 9,
+      "to_pos": [
+        0,
+        0
+      ],
+      "result": "ok"
+    }
+  ]
+}
