@@ -187,54 +187,100 @@ class FarmingLoop:
         print("  Could not return to town")
         return False
 
+    def _is_attackable(self, unit):
+        """Check if a unit is a valid attack target (not merc, NPC, or dead)."""
+        if unit.get("type") != "monster":
+            return False
+        if unit.get("dead", False):
+            return False
+
+        name = unit.get("name", "")
+        hp = unit.get("hp", 0) >> 8
+        max_hp = unit.get("max_hp", 0) >> 8
+
+        # Skip dead/no-HP units
+        if max_hp <= 0:
+            return False
+
+        # Skip town NPCs (name = "an evil force" with 0 or low HP, or known NPC names)
+        skip_names = {"an evil force", "charsi", "akara", "gheed", "warriv", "kashya",
+                      "deckard cain", "fara", "drognan", "lysander", "greiz", "elzix",
+                      "meshif", "jerhyn", "atma", "ormus", "hratli", "alkor", "asheara",
+                      "natalya", "tyrael", "jamella", "halbu", "cain",
+                      "larzuk", "qual-kehk", "malah", "anya", "nihlathak"}
+        if name.lower() in skip_names:
+            return False
+
+        # Skip mercenaries (class_id 271=A1 Rogue, 338=A2 Guard, 359=A3 Iron Wolf, 560=A5 Barb)
+        merc_classes = {271, 338, 359, 560, 561}
+        if unit.get("class_id") in merc_classes:
+            return False
+
+        return True
+
     def scan_and_attack(self, max_duration=60):
         """Scan for monsters and attack them."""
         start = time.time()
         total_killed = 0
+        teleport_count = 0
 
         while time.time() - start < max_duration:
             # Get nearby monsters
             units = self.mcp.call("get_nearby_units", {"max_distance": 40})
-            monsters = [u for u in units.get("units", [])
-                       if u.get("type") == "monster"
-                       and not u.get("dead", False)
-                       and u.get("hp", 0) > 0
-                       and u.get("name", "an evil force") != "an evil force"]  # skip town NPCs
+            monsters = [u for u in units.get("units", []) if self._is_attackable(u)]
 
             if not monsters:
                 # No monsters nearby, teleport to explore
                 px, py = self.get_position()
-                # Teleport in a random-ish direction
                 import random
                 angle = random.uniform(0, 2 * math.pi)
-                tx = int(px + 20 * math.cos(angle))
-                ty = int(py + 20 * math.sin(angle))
+                dist = random.uniform(15, 30)
+                tx = int(px + dist * math.cos(angle))
+                ty = int(py + dist * math.sin(angle))
                 self.teleport_to(tx, ty)
-                time.sleep(0.5)
+                teleport_count += 1
+                time.sleep(0.4)
+
+                # After many teleports with no monsters, area might be clear
+                if teleport_count > 20:
+                    print(f"    Explored {teleport_count} teleports, area seems clear")
+                    break
                 continue
 
-            # Attack the closest monster
-            target = monsters[0]
-            print(f"    Attacking {target['name']} (HP: {target.get('hp',0)>>8}) " +
-                  (f"IMMUNE: {','.join(target.get('immunities',[]))}" if target.get('immunities') else ""))
+            # Attack monsters in range
+            for target in monsters[:3]:  # attack up to 3 nearby
+                immunities = target.get("immunities", [])
+                immune_str = f" IMMUNE:{','.join(immunities)}" if immunities else ""
+                hp = target.get("hp", 0) >> 8
 
-            # Cast right-click skill on the monster
-            self.mcp.call("cast_skill", {"unit_id": target["unit_id"], "unit_type": 1})
-            time.sleep(0.5)
+                # Skip lightning immunes (we're a Lightning Sorc)
+                if "lightning" in immunities:
+                    continue
 
-            # Check if killed
-            units2 = self.mcp.call("get_nearby_units", {"max_distance": 40})
-            still_alive = any(u.get("unit_id") == target["unit_id"]
-                            and not u.get("dead", False) and u.get("hp", 0) > 0
-                            for u in units2.get("units", []))
-            if not still_alive:
-                total_killed += 1
+                print(f"    >> {target['name']} HP:{hp}{immune_str}")
 
-            # Safety check: HP
+                # Cast right-click skill on the monster (Chain Lightning)
+                for cast in range(3):
+                    self.mcp.call("cast_skill", {"unit_id": target["unit_id"], "unit_type": 1})
+                    time.sleep(0.3)
+
+                total_killed += 1  # approximate
+
+            # Safety: chicken if HP low
             hp_pct = self.get_hp_pct()
-            if hp_pct < 30:
-                print(f"    LOW HP ({hp_pct:.0f}%) — retreating!")
+            if hp_pct < 20:
+                print(f"    CHICKEN! HP at {hp_pct:.0f}% — exiting game!")
+                self.mcp.call("exit_game")
+                self.stats["deaths"] += 1
+                time.sleep(5)
                 return total_killed
+            elif hp_pct < 50:
+                print(f"    LOW HP ({hp_pct:.0f}%) — retreating to safe distance")
+                px, py = self.get_position()
+                self.teleport_to(px - 20, py - 20)
+                time.sleep(1)
+
+            teleport_count = 0  # reset after finding monsters
 
         return total_killed
 

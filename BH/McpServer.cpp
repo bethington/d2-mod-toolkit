@@ -733,6 +733,12 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "get_waypoints"},
+            {"description", "Get list of available waypoint destinations. Must be near a waypoint with panel open."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+
+        tools.push_back({
             {"name", "interact_entity"},
             {"description", "Reliably interact with an entity (stash, NPC, waypoint). Walks to entity, sends interact, verifies panel opened. Returns when interaction confirmed or timeout."},
             {"inputSchema", {
@@ -2493,6 +2499,37 @@ namespace {
                 {"current", {{"x", cx}, {"y", cy}}},
                 {"distance", dist}
             };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_waypoints") {
+            // Read waypoint destination table at 0x6FBACD8C
+            struct WpEntry { int slot; int areaId; };
+            struct WpReader {
+                WpEntry entries[40];
+                int count;
+                static void Read(WpReader& out) {
+                    out.count = 0;
+                    __try {
+                        for (int s = 0; s < 39 && out.count < 40; s++) {
+                            DWORD a = *(DWORD*)(0x6FBACD8C + s * 20);
+                            if (a > 0 && a < 200) {
+                                out.entries[out.count++] = {s, (int)a};
+                            }
+                        }
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            };
+            WpReader wr;
+            WpReader::Read(wr);
+
+            json waypoints = json::array();
+            for (int i = 0; i < wr.count; i++) {
+                waypoints.push_back({{"slot", wr.entries[i].slot}, {"area_id", wr.entries[i].areaId}});
+            }
+
+            DWORD wpFlag = *(DWORD*)0x6FBAADD0;
+            json info = {{"count", (int)waypoints.size()}, {"panel_open", wpFlag != 0}, {"waypoints", waypoints}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
