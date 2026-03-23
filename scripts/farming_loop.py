@@ -101,6 +101,25 @@ class FarmingLoop:
         self.mcp.call("cast_skill", {"x": x, "y": y})
         time.sleep(0.3)
 
+    def ensure_mobile(self):
+        """Check if character can move; if stuck, try to unstick."""
+        px, py = self.get_position()
+        self.mcp.call("walk_to", {"x": px + 5, "y": py + 5})
+        time.sleep(1)
+        px2, py2 = self.get_position()
+        if px == px2 and py == py2:
+            # Stuck! Try recovery steps
+            print("  Character stuck, attempting recovery...")
+            self.mcp.call("close_panels")
+            time.sleep(0.5)
+            self.mcp.call("walk_to", {"x": px + 5, "y": py + 5})
+            time.sleep(2)
+            px3, py3 = self.get_position()
+            if px == px3 and py == py3:
+                print("  Still stuck after close_panels")
+                return False
+        return True
+
     def travel_to_area(self, area_id):
         """Use waypoint to travel to an area."""
         # Close any open panels first
@@ -350,6 +369,15 @@ class FarmingLoop:
         self.stats["runs"] += 1
         run_start = time.time()
         print(f"\n=== Run {self.stats['runs']} ===")
+
+        # Pre-check: ensure character can move
+        if not self.ensure_mobile():
+            print("  Character is stuck, skipping run")
+            return False
+
+        # Close any open panels
+        self.mcp.call("close_panels")
+        time.sleep(0.5)
 
         # Step 1: Travel to farming area
         if not self.travel_to_area(area_id):
