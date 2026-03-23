@@ -338,7 +338,7 @@ class FarmingLoop:
                 time.sleep(0.4)
 
                 # After many teleports with no monsters, area might be clear
-                if teleport_count > 20:
+                if teleport_count > 40:
                     print(f"    Explored {teleport_count} teleports, area seems clear")
                     break
                 continue
@@ -494,6 +494,24 @@ class FarmingLoop:
         self.mcp.call("close_panels")
         time.sleep(0.5)
 
+        # If we're in the wrong act, waypoint to the target act's town first
+        gs = self.get_state()
+        current_area = gs.get("area", 0)
+        # Determine target act from area_id
+        if area_id <= 39: target_town = 1      # Act 1
+        elif area_id <= 74: target_town = 40    # Act 2
+        elif area_id <= 102: target_town = 75   # Act 3
+        elif area_id <= 108: target_town = 103  # Act 4
+        else: target_town = 109                  # Act 5
+
+        # Check if we're in the wrong act
+        if current_area > 39 and area_id <= 39:
+            print(f"  In wrong act (area {current_area}), waypointing to Act 1...")
+            self.travel_to_area(1)  # Go to Rogue Encampment first
+        elif current_area <= 39 and area_id > 108:
+            print(f"  In wrong act, waypointing to Act 5...")
+            self.travel_to_area(109)
+
         # Step 1: Travel to farming area
         if not self.travel_to_area(area_id):
             return False
@@ -577,11 +595,20 @@ def main():
         print(f"  7. Repeat {args.runs} times")
         return
 
+    # Verify character
+    ps = farm.mcp.call("get_player_state")
+    char_name = ps.get("name", "?")
+    char_level = ps.get("level", 0)
+    print(f"Character: {char_name} (Level {char_level} {ps.get('class', '?')})")
+    if char_level < 10:
+        print("WARNING: Low-level character — farming may not be effective")
+
     # Auto-detect skills
     print("Detecting skills...")
     if not farm.detect_skills():
-        print("ERROR: Could not detect Teleport/Combat skills")
-        sys.exit(1)
+        print("WARNING: Could not auto-detect skills, using defaults")
+        farm.SKILL_TELEPORT = 394
+        farm.SKILL_COMBAT = 47
 
     for run in range(args.runs):
         success = farm.run_single(args.area, farm_duration=args.duration)

@@ -229,10 +229,26 @@ def navigate_to_game(character=None):
 
         elif screen == "char_select":
             if character:
-                _click_character(ctrl_list, character)
+                found = _click_character(ctrl_list, character)
+                if not found:
+                    # Try scrolling or different slots
+                    pass
                 time.sleep(1)
             _click_ok_button(ctrl_list)
-            time.sleep(3)
+            time.sleep(8)
+
+            # Verify correct character loaded
+            if character:
+                state = get_game_state()
+                if state and state.get("state") == "in_game":
+                    ps = mcp_call("get_player_state")
+                    if ps and character.lower() not in ps.get("name", "").lower():
+                        loaded_name = ps.get("name", "?")
+                        print(f"  Wrong character loaded: '{loaded_name}', wanted '{character}'")
+                        # Exit and retry
+                        mcp_call("quit_game")
+                        time.sleep(8)
+                        return False  # will retry from scratch
 
         elif screen == "difficulty":
             _click_highest_difficulty(ctrl_list)
@@ -328,13 +344,23 @@ def _click_ok_button(controls):
 def _click_character(controls, name):
     """Click a character by name in the character select."""
     name_lower = name.lower()
+    # Search textbox controls that have OnPress (actual char slots, not header)
+    # Header is typically at y < 100, char slots are at y >= 150
     for c in controls:
+        if c["type"] != "textbox" or not c.get("has_on_press"):
+            continue
+        if c.get("y", 0) < 150:  # skip header
+            continue
         for t in c.get("text", []):
             if name_lower in t.lower():
-                print(f"  Clicking character '{t}' (index {c['index']})")
+                print(f"  Selecting character '{t.strip()}' (index {c['index']})")
+                # Click to select, then click again to highlight
                 mcp_call("click_control", {"index": c["index"]})
-                return
+                time.sleep(0.5)
+                mcp_call("click_control", {"index": c["index"]})
+                return True
     print(f"  Character '{name}' not found")
+    return False
 
 
 def _click_highest_difficulty(controls):
