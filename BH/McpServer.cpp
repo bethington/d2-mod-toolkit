@@ -733,6 +733,34 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "cast_skill"},
+            {"description", "Cast the currently selected skill at a location or on a unit. Use right-click skill by default."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"x", {{"type", "integer"}, {"description", "Target X coordinate (for location cast)"}}},
+                    {"y", {{"type", "integer"}, {"description", "Target Y coordinate (for location cast)"}}},
+                    {"unit_id", {{"type", "integer"}, {"description", "Target unit ID (for unit cast, overrides x/y)"}}},
+                    {"unit_type", {{"type", "integer"}, {"description", "Target unit type (default 1=monster)"}}},
+                    {"left", {{"type", "boolean"}, {"description", "Use left skill instead of right (default false)"}}}
+                }}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "use_waypoint"},
+            {"description", "Use a waypoint to travel to a destination. Walk to waypoint first, interact, then call this with destination. Destinations: 0=Rogue Encampment, 1=Cold Plains, ... (D2 area IDs)."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"waypoint_id", {{"type", "integer"}, {"description", "Waypoint unit ID (from get_nearby_objects)"}}},
+                    {"destination", {{"type", "integer"}, {"description", "Destination waypoint index (0-38)"}}}
+                }},
+                {"required", json::array({"waypoint_id", "destination"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "sell_item"},
             {"description", "Sell an item to the currently open NPC trade window. NPC trade must be open (use interact_object on NPC first)."},
             {"inputSchema", {
@@ -2414,6 +2442,77 @@ namespace {
                 {"current", {{"x", cx}, {"y", cy}}},
                 {"distance", dist}
             };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "cast_skill") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int x = arguments.value("x", 0);
+            int y = arguments.value("y", 0);
+            int unitId = arguments.value("unit_id", -1);
+            int unitType = arguments.value("unit_type", 1);
+            bool left = arguments.value("left", false);
+
+            if (unitId >= 0) {
+                // Cast on unit: 0x06 (left) or 0x0D (right) = 9 bytes
+                BYTE packet[9] = {};
+                packet[0] = left ? 0x06 : 0x0D;
+                *(DWORD*)&packet[1] = unitType;
+                *(DWORD*)&packet[5] = unitId;
+                D2NET_SendPacket(9, 1, packet);
+                json info = {{"status", "cast_on_unit"}, {"unit_id", unitId},
+                             {"skill_side", left ? "left" : "right"}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            } else {
+                // Cast at location: 0x05 (left) or 0x0C (right) = 5 bytes
+                BYTE packet[5] = {};
+                packet[0] = left ? 0x05 : 0x0C;
+                *(WORD*)&packet[1] = (WORD)x;
+                *(WORD*)&packet[3] = (WORD)y;
+                D2NET_SendPacket(5, 1, packet);
+                json info = {{"status", "cast_at_location"}, {"x", x}, {"y", y},
+                             {"skill_side", left ? "left" : "right"}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+        }
+
+        if (name == "use_waypoint") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            DWORD wpId = arguments.value("waypoint_id", (DWORD)0);
+            int dest = arguments.value("destination", 0);
+
+            // Waypoint packet: 0x49, wp_unit_id(4), destination(1), padding(3)
+            BYTE packet[9] = {};
+            packet[0] = 0x49;
+            *(DWORD*)&packet[1] = wpId;
+            packet[5] = (BYTE)dest;
+
+            D2NET_SendPacket(9, 1, packet);
+
+            // Waypoint destination names
+            static const char* wpNames[] = {
+                "Rogue Encampment", "Cold Plains", "Stony Field", "Dark Wood",
+                "Black Marsh", "Outer Cloister", "Jail Level 1", "Inner Cloister",
+                "Catacombs Level 2",
+                "Lut Gholein", "Sewers Level 2", "Dry Hills", "Halls of the Dead Level 2",
+                "Far Oasis", "Lost City", "Palace Cellar Level 1", "Arcane Sanctuary",
+                "Canyon of the Magi",
+                "Kurast Docks", "Spider Forest", "Great Marsh", "Flayer Jungle",
+                "Lower Kurast", "Kurast Bazaar", "Upper Kurast", "Travincal",
+                "Durance of Hate Level 2",
+                "Pandemonium Fortress", "City of the Damned", "River of Flame",
+                "Harrogath", "Frigid Highlands", "Arreat Plateau", "Crystalline Passage",
+                "Halls of Pain", "Glacial Trail", "Frozen Tundra",
+                "The Ancients' Way", "Worldstone Keep Level 2"
+            };
+            const char* destName = (dest >= 0 && dest < 39) ? wpNames[dest] : "Unknown";
+
+            json info = {{"status", "waypoint_used"}, {"waypoint_id", (int)wpId},
+                         {"destination", dest}, {"destination_name", destName}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
