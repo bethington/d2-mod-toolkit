@@ -749,7 +749,7 @@ namespace {
 
         tools.push_back({
             {"name", "use_waypoint"},
-            {"description", "Use a waypoint to travel to a destination. Walk to waypoint first, interact, then call this with destination. Destinations: 0=Rogue Encampment, 1=Cold Plains, ... (D2 area IDs)."},
+            {"description", "Use a waypoint to travel. Walk near waypoint first. destination = D2 area ID (1=Rogue Encampment, 2=Cold Plains, 40=Lut Gholein, 75=Kurast Docks, 109=Harrogath)."},
             {"inputSchema", {
                 {"type", "object"},
                 {"properties", {
@@ -2485,13 +2485,49 @@ namespace {
             DWORD wpId = arguments.value("waypoint_id", (DWORD)0);
             int dest = arguments.value("destination", 0);
 
-            // Waypoint packet: 0x49, wp_unit_id(4), destination(1), padding(3)
-            BYTE packet[9] = {};
-            packet[0] = 0x49;
-            *(DWORD*)&packet[1] = wpId;
-            packet[5] = (BYTE)dest;
+            // Step 1: Walk to entity (0x02) — makes character walk to waypoint and interact
+            {
+                BYTE pkt[9] = {};
+                pkt[0] = 0x02; // Walk to Entity
+                *(DWORD*)&pkt[1] = 2;  // entity type = object
+                *(DWORD*)&pkt[5] = wpId;
+                D2NET_SendPacket(9, 0, pkt);
+            }
 
-            D2NET_SendPacket(9, 1, packet);
+            // Wait for character to reach waypoint and panel to open
+            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+            bool panelOpened = false;
+            for (int wait = 0; wait < 40; wait++) { // up to 8 seconds
+                Sleep(200);
+                if (hPD2) {
+                    DWORD* pPtr = (DWORD*)((DWORD)hPD2 + 0x00410688);
+                    if (*pPtr && *((DWORD*)*pPtr) != 0) {
+                        panelOpened = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!panelOpened) {
+                // Try interact packet as fallback
+                BYTE pkt[9] = {};
+                pkt[0] = 0x13;
+                *(DWORD*)&pkt[1] = 2;
+                *(DWORD*)&pkt[5] = wpId;
+                D2NET_SendPacket(9, 1, pkt);
+                Sleep(2000);
+            }
+
+            // Step 2: Send waypoint destination packet
+            // Format: {0x49, DWORD wp_data, DWORD area_id} = 9 bytes
+            // wp_data = waypoint unit ID, area_id = destination area number
+            {
+                BYTE pkt[9] = {};
+                pkt[0] = 0x49;
+                *(DWORD*)&pkt[1] = wpId;
+                *(DWORD*)&pkt[5] = dest; // dest is the AREA ID (1=Rogue, 109=Harrogath, etc.)
+                D2NET_SendPacket(9, 1, pkt);
+            }
 
             // Waypoint destination names
             static const char* wpNames[] = {
