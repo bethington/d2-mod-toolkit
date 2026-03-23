@@ -458,6 +458,19 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "launch_character"},
+            {"description", "Launch a game with a specific character by name. Uses D2Launch's internal character list. Must be at the character select screen."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {{"type", "string"}, {"description", "Character name to find and launch"}}},
+                    {"difficulty", {{"type", "integer"}, {"description", "Difficulty: 0=Normal, 1=Nightmare, 2=Hell (default: highest)"}}}
+                }},
+                {"required", json::array({"name"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "select_character"},
             {"description", "Select a character by name on the character select screen. Searches all textbox controls for the name, then simulates a mouse click at that slot's coordinates."},
             {"inputSchema", {
@@ -1648,6 +1661,82 @@ namespace {
                 idx++;
             }
             json info = {{"count", controls.size()}, {"controls", controls}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "launch_character") {
+            // Directly launch a character using D2Launch's internal character list.
+            // D2Launch globals (1.13c PD2)
+            struct CharLauncher {
+                struct CharInfo { char name[64]; int index; };
+
+                static bool ReadName(DWORD entry, char* out, int maxLen) {
+                    __try {
+                        // PD2: character name is ANSI at entry+0x000 (not Unicode at +0x100)
+                        strncpy_s(out, maxLen, (const char*)entry, maxLen - 1);
+                        return true;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+                }
+
+                static int FindChar(const char* search, CharInfo* outChars, int maxChars) {
+                    DWORD* pHead = (DWORD*)0x6FA65EC8;
+                    DWORD entry = *pHead;
+                    int count = 0;
+                    int foundIdx = -1;
+
+                    while (entry && count < maxChars) {
+                        char name[64] = {};
+                        if (ReadName(entry, name, sizeof(name))) {
+                            strncpy_s(outChars[count].name, name, sizeof(outChars[count].name));
+                            outChars[count].index = count;
+
+                            // Case-insensitive match
+                            char nameLower[64], searchLower[64];
+                            strncpy_s(nameLower, name, sizeof(nameLower));
+                            strncpy_s(searchLower, search, sizeof(searchLower));
+                            for (char* p = nameLower; *p; p++) *p = tolower(*p);
+                            for (char* p = searchLower; *p; p++) *p = tolower(*p);
+                            if (strstr(nameLower, searchLower) && foundIdx < 0) {
+                                foundIdx = count;
+                            }
+                        }
+                        __try { entry = *(DWORD*)(entry + 0x34C); }
+                        __except(EXCEPTION_EXECUTE_HANDLER) { break; }
+                        count++;
+                    }
+                    return foundIdx;
+                }
+
+                static bool Launch(int charIndex) {
+                    __try {
+                        *(DWORD*)0x6FA64DB0 = charIndex; // g_nSelectedCharIndex
+                        typedef void (__stdcall *Fn)(BYTE);
+                        ((Fn)0x6FA4DE20)(0); // SelectCharacterByIndex(0)
+                        return true;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+                }
+            };
+
+            std::string charName = arguments.value("name", "");
+            if (charName.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "name required"}}}}, {"isError", true}};
+            }
+
+            CharLauncher::CharInfo chars[20];
+            int foundIdx = CharLauncher::FindChar(charName.c_str(), chars, 20);
+
+            if (foundIdx < 0) {
+                json available = json::array();
+                for (int i = 0; i < 20 && chars[i].name[0]; i++) {
+                    available.push_back(chars[i].name);
+                }
+                json err = {{"status", "not_found"}, {"searched", charName}, {"available", available}};
+                return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
+            }
+
+            bool launched = CharLauncher::Launch(foundIdx);
+            json info = {{"status", launched ? "launched" : "failed"},
+                         {"character", chars[foundIdx].name}, {"index", foundIdx}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
