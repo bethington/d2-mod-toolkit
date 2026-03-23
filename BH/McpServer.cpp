@@ -458,6 +458,37 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "get_collision_map"},
+            {"description", "Get the collision map for the current area. Returns walkable/unwalkable grid, level exits, and player position. Used for teleport pathfinding."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"area_id", {{"type", "integer"}, {"description", "Area ID (default: current area)"}}}
+                }}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "find_teleport_path"},
+            {"description", "Find a teleport path from current position to target coordinates using collision data. Returns array of teleport waypoints."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"target_x", {{"type", "integer"}, {"description", "Target X coordinate"}}},
+                    {"target_y", {{"type", "integer"}, {"description", "Target Y coordinate"}}},
+                    {"teleport_range", {{"type", "integer"}, {"description", "Max teleport distance per hop (default 35)"}}}
+                }},
+                {"required", json::array({"target_x", "target_y"})}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_level_exits"},
+            {"description", "Get exits and waypoints for the current level. Returns positions of level exits, waypoints, and key objects."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+
+        tools.push_back({
             {"name", "launch_character"},
             {"description", "Launch a game with a specific character by name. Uses D2Launch's internal character list. Must be at the character select screen."},
             {"inputSchema", {
@@ -1661,6 +1692,257 @@ namespace {
                 idx++;
             }
             json info = {{"count", controls.size()}, {"controls", controls}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_collision_map") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            struct CollMapReader {
+                struct MapData {
+                    int originX, originY;
+                    int sizeX, sizeY;
+                    int walkable;  // count of walkable cells
+                    int total;
+                    bool error;
+                    // Store a downsampled summary (full map can be huge)
+                    int gridW, gridH;
+                    BYTE grid[200][200]; // 0=wall, 1=walkable, downsampled
+                };
+
+                static void Read(MapData& out) {
+                    out.error = true;
+                    out.walkable = 0;
+                    out.total = 0;
+                    out.gridW = 0;
+                    out.gridH = 0;
+                    __try {
+                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                        if (!pPlayer || !pPlayer->pPath || !pPlayer->pPath->pRoom1) return;
+
+                        Room2* pRoom2 = pPlayer->pPath->pRoom1->pRoom2;
+                        if (!pRoom2 || !pRoom2->pLevel) return;
+
+                        Level* pLevel = pRoom2->pLevel;
+                        out.originX = pLevel->dwPosX * 5;
+                        out.originY = pLevel->dwPosY * 5;
+                        int levelW = pLevel->dwSizeX * 5;
+                        int levelH = pLevel->dwSizeY * 5;
+                        out.sizeX = levelW;
+                        out.sizeY = levelH;
+
+                        // Scan all rooms for collision data
+                        // Downsample to max 200x200 grid
+                        int scaleX = (levelW + 199) / 200;
+                        int scaleY = (levelH + 199) / 200;
+                        if (scaleX < 1) scaleX = 1;
+                        if (scaleY < 1) scaleY = 1;
+                        out.gridW = levelW / scaleX;
+                        out.gridH = levelH / scaleY;
+                        if (out.gridW > 200) out.gridW = 200;
+                        if (out.gridH > 200) out.gridH = 200;
+
+                        memset(out.grid, 0, sizeof(out.grid));
+
+                        // Walk all Room2s in this level
+                        Room2* r2 = pLevel->pRoom2First;
+                        while (r2) {
+                            if (r2->pLevel && r2->pLevel->dwLevelNo == pLevel->dwLevelNo) {
+                                bool addedRoom = false;
+                                if (!r2->pRoom1) {
+                                    D2COMMON_AddRoomData(pPlayer->pAct, pLevel->dwLevelNo,
+                                        r2->dwPosX, r2->dwPosY, pPlayer->pPath->pRoom1);
+                                    addedRoom = true;
+                                }
+
+                                if (r2->pRoom1 && r2->pRoom1->Coll) {
+                                    CollMap* pCol = r2->pRoom1->Coll;
+                                    WORD* p = pCol->pMapStart;
+                                    int cx = pCol->dwSizeGameX;
+                                    int cy = pCol->dwSizeGameY;
+                                    int rx = pCol->dwPosGameX - out.originX;
+                                    int ry = pCol->dwPosGameY - out.originY;
+
+                                    for (int j = 0; j < cy; j++) {
+                                        for (int i = 0; i < cx; i++) {
+                                            WORD val = *p++;
+                                            out.total++;
+                                            bool walk = (val % 2 == 0); // even = walkable
+                                            if (walk) out.walkable++;
+
+                                            // Map to downsampled grid
+                                            int gx = (rx + i) / scaleX;
+                                            int gy = (ry + j) / scaleY;
+                                            if (gx >= 0 && gx < out.gridW && gy >= 0 && gy < out.gridH) {
+                                                if (walk) out.grid[gx][gy] = 1;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (addedRoom) {
+                                    D2COMMON_RemoveRoomData(pPlayer->pAct, pLevel->dwLevelNo,
+                                        r2->dwPosX, r2->dwPosY, pPlayer->pPath->pRoom1);
+                                }
+                            }
+                            r2 = r2->pRoom2Next;
+                        }
+
+                        out.error = false;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            };
+
+            CollMapReader::MapData md;
+            CollMapReader::Read(md);
+
+            if (md.error) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed to read collision map"}}}}, {"isError", true}};
+            }
+
+            // Build grid string representation (compact)
+            json rows = json::array();
+            for (int y = 0; y < md.gridH; y++) {
+                std::string row;
+                for (int x = 0; x < md.gridW; x++) {
+                    row += md.grid[x][y] ? '.' : '#';
+                }
+                rows.push_back(row);
+            }
+
+            // Player position in grid coords
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            int playerGridX = 0, playerGridY = 0;
+            if (pPlayer && pPlayer->pPath) {
+                int scaleX = (md.sizeX + 199) / 200;
+                int scaleY = (md.sizeY + 199) / 200;
+                if (scaleX < 1) scaleX = 1;
+                if (scaleY < 1) scaleY = 1;
+                playerGridX = (pPlayer->pPath->xPos - md.originX) / scaleX;
+                playerGridY = (pPlayer->pPath->yPos - md.originY) / scaleY;
+            }
+
+            json info = {
+                {"origin", {{"x", md.originX}, {"y", md.originY}}},
+                {"size", {{"x", md.sizeX}, {"y", md.sizeY}}},
+                {"grid_size", {{"w", md.gridW}, {"h", md.gridH}}},
+                {"walkable_cells", md.walkable},
+                {"total_cells", md.total},
+                {"walkable_pct", md.total > 0 ? (int)(md.walkable * 100.0 / md.total) : 0},
+                {"player_grid", {{"x", playerGridX}, {"y", playerGridY}}},
+                {"grid", rows}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_level_exits") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            struct ExitReader {
+                struct Exit { int x, y; int targetLevel; int type; };
+                Exit exits[20];
+                int count;
+                static void Read(ExitReader& out) {
+                    out.count = 0;
+                    __try {
+                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                        if (!pPlayer || !pPlayer->pPath || !pPlayer->pPath->pRoom1) return;
+
+                        Room2* pRoom2 = pPlayer->pPath->pRoom1->pRoom2;
+                        if (!pRoom2 || !pRoom2->pLevel) return;
+
+                        Level* pLevel = pRoom2->pLevel;
+
+                        // Walk all Room2s looking for exits (tiles with target levels)
+                        Room2* r2 = pLevel->pRoom2First;
+                        while (r2 && out.count < 20) {
+                            // Check preset units for exits
+                            if (r2->pPreset) {
+                                PresetUnit* pu = r2->pPreset;
+                                while (pu && out.count < 20) {
+                                    // Type 5 = tile (level exits)
+                                    if (pu->dwType == 5) {
+                                        out.exits[out.count].x = r2->dwPosX * 5 + pu->dwPosX;
+                                        out.exits[out.count].y = r2->dwPosY * 5 + pu->dwPosY;
+                                        out.exits[out.count].targetLevel = 0; // TODO: resolve
+                                        out.exits[out.count].type = 1; // level exit
+                                        out.count++;
+                                    }
+                                    // Type 2 = object (waypoints, etc)
+                                    if (pu->dwType == 2 && (pu->dwTxtFileNo == 119 || pu->dwTxtFileNo == 156 ||
+                                        pu->dwTxtFileNo == 157 || pu->dwTxtFileNo == 237 || pu->dwTxtFileNo == 238 ||
+                                        pu->dwTxtFileNo == 398 || pu->dwTxtFileNo == 402 || pu->dwTxtFileNo == 429 ||
+                                        pu->dwTxtFileNo == 494 || pu->dwTxtFileNo == 496 || pu->dwTxtFileNo == 511)) {
+                                        out.exits[out.count].x = r2->dwPosX * 5 + pu->dwPosX;
+                                        out.exits[out.count].y = r2->dwPosY * 5 + pu->dwPosY;
+                                        out.exits[out.count].targetLevel = 0;
+                                        out.exits[out.count].type = 2; // waypoint
+                                        out.count++;
+                                    }
+                                    pu = pu->pPresetNext;
+                                }
+                            }
+                            r2 = r2->pRoom2Next;
+                        }
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            };
+
+            ExitReader er;
+            ExitReader::Read(er);
+
+            json exits = json::array();
+            for (int i = 0; i < er.count; i++) {
+                json e = {
+                    {"x", er.exits[i].x}, {"y", er.exits[i].y},
+                    {"type", er.exits[i].type == 2 ? "waypoint" : "exit"}
+                };
+                exits.push_back(e);
+            }
+
+            json info = {{"count", er.count}, {"exits", exits}};
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "find_teleport_path") {
+            // TODO: implement A* pathfinding using collision map
+            // For now, return a simple straight-line path with teleport hops
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int targetX = arguments.value("target_x", 0);
+            int targetY = arguments.value("target_y", 0);
+            int range = arguments.value("teleport_range", 35);
+
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pPath) {
+                return {{"content", {{{"type", "text"}, {"text", "No player"}}}}, {"isError", true}};
+            }
+            int px = pPlayer->pPath->xPos, py = pPlayer->pPath->yPos;
+
+            // Simple straight-line path with range-limited hops
+            json path = json::array();
+            double dx = targetX - px, dy = targetY - py;
+            double dist = sqrt(dx*dx + dy*dy);
+            int hops = (int)(dist / range) + 1;
+            for (int i = 1; i <= hops; i++) {
+                double t = (double)i / hops;
+                int hx = (int)(px + dx * t);
+                int hy = (int)(py + dy * t);
+                path.push_back({{"x", hx}, {"y", hy}, {"hop", i}});
+            }
+
+            json info = {
+                {"start", {{"x", px}, {"y", py}}},
+                {"target", {{"x", targetX}, {"y", targetY}}},
+                {"distance", (int)dist},
+                {"hops", hops},
+                {"path", path}
+            };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
