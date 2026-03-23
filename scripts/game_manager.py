@@ -275,22 +275,20 @@ def _identify_screen(controls):
     if any("select gateway" in t for t in texts):
         return "gateway"
 
-    # Priority 2: Difficulty overlay on char select
-    # Difficulty buttons: x~264, y 280-400, width ~272, appear ON TOP of char select
-    diff_buttons = [b for b in buttons if 250 <= b["x"] <= 280 and 280 <= b["y"] <= 400
-                    and b["w"] >= 200]
-    if len(diff_buttons) >= 2:
-        return "difficulty"
-
-    # Priority 3: Char select (OK button at x>600 + many textboxes with names)
+    # Priority 2: Char select (OK button at x>600 + many textboxes with names)
     has_ok = any(b["x"] > 600 and b["y"] > 550 for b in buttons)
     has_char_slots = len(textboxes) >= 8
     if has_ok and has_char_slots:
+        # Check for difficulty overlay ON TOP of char select
+        diff_buttons = [b for b in buttons if 250 <= b["x"] <= 280 and 280 <= b["y"] <= 400
+                        and b["w"] >= 200]
+        if len(diff_buttons) >= 2:
+            return "difficulty"
         return "char_select"
 
-    # Priority 4: Main menu (4+ buttons at x=264)
+    # Priority 3: Main menu (4+ buttons at x=264, NO char slots)
     menu_buttons = [b for b in buttons if b["x"] == 264]
-    if len(menu_buttons) >= 4:
+    if len(menu_buttons) >= 4 and not has_char_slots:
         return "main_menu"
 
     # Priority 5: Any screen with 5+ buttons is likely main menu
