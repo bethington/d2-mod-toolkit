@@ -2518,10 +2518,20 @@ namespace {
 
             // Helper: check if expected panel is open
             auto panelMatches = [&](int state) -> bool {
-                if (expectedPanel == "any") return state > 0;
                 if (expectedPanel == "stash") return state == 0x0C;
                 if (expectedPanel == "trade") return state == 0x0D;
-                if (expectedPanel == "waypoint") return state > 0; // waypoint uses SetUIVar, not panel state
+                if (expectedPanel == "waypoint") {
+                    // Waypoint panel uses g_dwData_add0 at D2CLIENT+0xFAADD0 offset
+                    // Address: 0x6FBAADD0
+                    DWORD* pWpFlag = (DWORD*)0x6FBAADD0;
+                    return *pWpFlag != 0;
+                }
+                if (expectedPanel == "any") {
+                    if (state > 0) return true;
+                    // Also check waypoint panel
+                    DWORD* pWpFlag = (DWORD*)0x6FBAADD0;
+                    return *pWpFlag != 0;
+                }
                 return state > 0;
             };
 
@@ -2724,38 +2734,15 @@ namespace {
             DWORD wpId = arguments.value("waypoint_id", (DWORD)0);
             int dest = arguments.value("destination", 0);
 
-            // Step 1: Walk to entity (0x02) — makes character walk to waypoint and interact
+            // Step 1: Interact with waypoint (0x13) — character auto-walks to it
             {
                 BYTE pkt[9] = {};
-                pkt[0] = 0x02; // Walk to Entity
+                pkt[0] = 0x13;
                 *(DWORD*)&pkt[1] = 2;  // entity type = object
                 *(DWORD*)&pkt[5] = wpId;
-                D2NET_SendPacket(9, 0, pkt);
-            }
-
-            // Wait for character to reach waypoint and panel to open
-            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
-            bool panelOpened = false;
-            for (int wait = 0; wait < 40; wait++) { // up to 8 seconds
-                Sleep(200);
-                if (hPD2) {
-                    DWORD* pPtr = (DWORD*)((DWORD)hPD2 + 0x00410688);
-                    if (*pPtr && *((DWORD*)*pPtr) != 0) {
-                        panelOpened = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!panelOpened) {
-                // Try interact packet as fallback
-                BYTE pkt[9] = {};
-                pkt[0] = 0x13;
-                *(DWORD*)&pkt[1] = 2;
-                *(DWORD*)&pkt[5] = wpId;
                 D2NET_SendPacket(9, 1, pkt);
-                Sleep(2000);
             }
+            Sleep(500); // brief wait for interact to process
 
             // Step 2: Send waypoint destination packet
             // Format: {0x49, DWORD wp_data, DWORD area_id} = 9 bytes
