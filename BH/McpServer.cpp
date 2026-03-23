@@ -3072,9 +3072,18 @@ namespace {
                 D2NET_SendPacket(9, 1, pkt);
             }
 
-            // Step 3: Close waypoint panel via SetUIVar(UI_WPMENU=0x14, 0, 0)
+            // Step 3: Close waypoint panel via SetUIVar on game thread
             Sleep(500);
-            D2CLIENT_SetUIVar(0x14, 0, 0);
+            {
+                GameCallQueue::PendingCall call = {};
+                call.address = (DWORD)D2CLIENT_SetUIVar;
+                call.args[0] = 0x14; // UI_WPMENU
+                call.args[1] = 0;    // close
+                call.args[2] = 0;
+                call.argCount = 3;
+                call.convention = 2; // fastcall
+                GameCallQueue::CallOnGameThread(call, 3000);
+            }
 
             // Waypoint destination names
             static const char* wpNames[] = {
@@ -3349,7 +3358,14 @@ namespace {
             D2CLIENT_CloseInteract();
             // Also close waypoint panel which uses a separate state
             if (*(DWORD*)0x6FBAADD0 != 0) {
-                D2CLIENT_SetUIVar(0x14, 0, 0); // UI_WPMENU = 0x14
+                GameCallQueue::PendingCall call = {};
+                call.address = (DWORD)D2CLIENT_SetUIVar;
+                call.args[0] = 0x14; // UI_WPMENU
+                call.args[1] = 0;    // close
+                call.args[2] = 0;
+                call.argCount = 3;
+                call.convention = 2; // fastcall
+                GameCallQueue::CallOnGameThread(call, 3000);
             }
             return {{"content", {{{"type", "text"}, {"text", "Panels closed"}}}}};
         }
