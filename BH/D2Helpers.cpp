@@ -3,6 +3,7 @@
 #include "D2Stubs.h"
 #include "Common.h"
 #include "Constants.h"
+#include "GameCallQueue.h"
 
 int quality_to_color[] = {
 	White, // none
@@ -347,6 +348,91 @@ bool Interact(DWORD UnitId, DWORD UnitType) {
 	delete[] aPacket;
 
 	return 1;
+}
+
+// D2BS-style ClickMap — calls D2CLIENT_ClickMap directly on the game thread.
+// dwClickType: 1=left, 2=right click
+// wX, wY: world coordinates
+// bShift: TRUE for shift-click (stand still)
+// pUnit: target unit (or nullptr for location click)
+bool ClickMap(DWORD dwClickType, int wX, int wY, BOOL bShift, UnitAny* pUnit) {
+    UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+    if (!pPlayer || !pPlayer->pPath) return false;
+
+    long clickX = wX;
+    long clickY = wY;
+
+    // If targeting a unit, use its position
+    if (pUnit) {
+        clickX = D2CLIENT_GetUnitX(pUnit);
+        clickY = D2CLIENT_GetUnitY(pUnit);
+    }
+
+    // Convert world coords to absolute screen coords
+    D2COMMON_MapToAbsScreen(&clickX, &clickY);
+
+    // Subtract viewport offset — D2BS uses *p_D2CLIENT_ViewportX/Y
+    // which maps to D2CLIENT_Offset (a POINT)
+    // Use GetMouseXOffset/YOffset as safer alternative
+    clickX -= D2CLIENT_GetMouseXOffset();
+    clickY -= D2CLIENT_GetMouseYOffset();
+
+    // Save original mouse position
+    DWORD oldMouseX = *p_D2CLIENT_MouseX;
+    DWORD oldMouseY = *p_D2CLIENT_MouseY;
+
+    // Zero mouse position (D2BS pattern — prevents game from using real cursor pos)
+    *p_D2CLIENT_MouseX = 0;
+    *p_D2CLIENT_MouseY = 0;
+
+    __try {
+        // Call the game's own click handler
+        // Type: 0x08 = always run, 0x0C = shift (stand still)
+        D2CLIENT_ClickMap(dwClickType, (DWORD)clickX, (DWORD)clickY, bShift ? 0x0C : 0x08);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        *p_D2CLIENT_MouseX = oldMouseX;
+        *p_D2CLIENT_MouseY = oldMouseY;
+        return false;
+    }
+
+    // Restore mouse position
+    *p_D2CLIENT_MouseX = oldMouseX;
+    *p_D2CLIENT_MouseY = oldMouseY;
+
+    return true;
+}
+
+// Queued version — schedules ClickMap on the game thread via GameCallQueue
+// Uses a static helper that GameCallQueue can call
+static struct ClickMapParams {
+    DWORD clickType;
+    int x, y;
+    BOOL shift;
+    bool result;
+    bool ready;
+} g_clickMapParams = {};
+
+static DWORD __stdcall ClickMapOnGameThread() {
+    g_clickMapParams.result = ClickMap(
+        g_clickMapParams.clickType,
+        g_clickMapParams.x,
+        g_clickMapParams.y,
+        g_clickMapParams.shift
+    );
+    return g_clickMapParams.result ? 1 : 0;
+}
+
+bool ClickMapQueued(DWORD dwClickType, int wX, int wY, BOOL bShift) {
+    g_clickMapParams.clickType = dwClickType;
+    g_clickMapParams.x = wX;
+    g_clickMapParams.y = wY;
+    g_clickMapParams.shift = bShift;
+
+    GameCallQueue::PendingCall call = {};
+    call.address = (DWORD)&ClickMapOnGameThread;
+    call.argCount = 0;
+    call.convention = 0; // stdcall
+    return GameCallQueue::CallOnGameThread(call, 5000);
 }
 
 std::string GetItemCode(int dwTxtFileNo) {

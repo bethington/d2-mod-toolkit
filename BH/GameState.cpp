@@ -1,4 +1,5 @@
 #include "GameState.h"
+#include "StreamStats.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 #include "Constants.h"
@@ -15,6 +16,11 @@ namespace {
     GameState::BeltState g_belt;
     std::vector<GameState::NearbyUnit> g_units;
     bool g_ready = false;
+
+    // Session stats (persist for DLL lifetime)
+    GameState::SessionStats g_sessionStats;
+    bool g_wasAlive = true;   // edge detection for death counting
+    bool g_wasInGame = false; // edge detection for game entry counting
 
     const char* GetClassName(int classId) {
         switch (classId) {
@@ -336,6 +342,14 @@ namespace {
             }
         } catch (...) {}
 
+        // Death detection: edge-trigger on player mode transition to dead
+        bool isDead = (pPlayer->dwMode == PLAYER_MODE_DEATH || pPlayer->dwMode == PLAYER_MODE_DEAD);
+        if (isDead && g_wasAlive) {
+            g_sessionStats.deaths++;
+            StreamStats::RecordDeath();
+        }
+        g_wasAlive = !isDead;
+
         std::lock_guard<std::mutex> lock(g_mutex);
         g_player = ps;
     }
@@ -522,8 +536,17 @@ namespace {
 namespace GameState {
 
     void Update() {
+        bool wasReady = g_ready;
         g_ready = IsGameReady();
-        if (!g_ready) return;
+        if (g_ready && !wasReady) {
+            g_sessionStats.gamesEntered++;
+            StreamStats::RecordGameEntered();
+            g_wasAlive = true; // reset death edge detection for new game
+        }
+        if (!g_ready) {
+            g_wasInGame = false;
+            return;
+        }
 
         __try {
             UpdatePlayerState();
@@ -555,6 +578,15 @@ namespace GameState {
             if (u.distance <= maxDistance) filtered.push_back(u);
         }
         return filtered;
+    }
+
+    SessionStats GetSessionStats() {
+        // No mutex needed — reads are atomic for ints
+        return g_sessionStats;
+    }
+
+    void RecordGameEntered() {
+        g_sessionStats.gamesEntered++;
     }
 
     bool IsGameReady() {

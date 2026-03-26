@@ -151,6 +151,12 @@ namespace GameState {
         int magicRes = 0;
     };
 
+    // Session statistics (persist across games within a single DLL session)
+    struct SessionStats {
+        int deaths = 0;         // times player died
+        int gamesEntered = 0;   // times a game was entered (restarts)
+    };
+
     // Update game state snapshot (call from game thread)
     void Update();
 
@@ -158,6 +164,10 @@ namespace GameState {
     PlayerState GetPlayerState();
     BeltState GetBeltState();
     std::vector<NearbyUnit> GetNearbyUnits(int maxDistance = 40);
+    SessionStats GetSessionStats();
+
+    // Record events
+    void RecordGameEntered();
 
     // Is the game in a state where we can read data?
     bool IsGameReady();

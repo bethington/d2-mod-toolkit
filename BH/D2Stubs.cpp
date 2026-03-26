@@ -11,6 +11,23 @@ DWORD __declspec(naked) __fastcall D2CLIENT_GetUnitName_STUB(DWORD UnitAny)
 	}
 }
 
+// D2BS-style SendGamePacket stub
+// The game function at 0x143E0 expects: packet length in EBX, packet pointer on stack
+// We wrap this as __fastcall(dwLen, bPacket) for C++ usage
+DWORD __declspec(naked) __fastcall D2CLIENT_SendGamePacket_ASM(DWORD /*dwLen*/, BYTE* /*bPacket*/)
+{
+    __asm
+    {
+        push edi
+        mov edi, edx           // bPacket (2nd fastcall arg = EDX) -> EDI
+        mov ebx, ecx           // dwLen (1st fastcall arg = ECX) -> EBX
+        push edi               // push packet pointer onto stack
+        call D2CLIENT_SendGamePacket_I
+        pop edi
+        ret
+    }
+}
+
 DWORD __declspec(naked) __fastcall D2CLIENT_InitAutomapLayer(DWORD nLayerNo)
 {
 	__asm
@@ -98,6 +115,25 @@ __declspec(naked) void __stdcall D2CLIENT_PlayItemDropSounds_STUB(UnitAny* pUnit
 		mov EAX, [esp + 4]                                   // pUnit
 		call D2CLIENT_PlayItemDropSounds                     // 0x827C0
 		retn 4
+	}
+}
+
+// Waypoint tab switching stubs
+// ValidateSkillLevelRequirements at 0x6fb5a140 takes act index in EAX
+// UpdateRoomLevelTracker at 0x6fb59f40 reads DAT_6fbacdd6 and populates WP list
+// Wrapped as __fastcall so GameCallQueue can pass act index via ECX
+DWORD __declspec(naked) __fastcall D2CLIENT_SetWaypointTab_STUB(DWORD actIndex)
+{
+	__asm
+	{
+		push ebx
+		mov eax, ecx                  // actIndex from fastcall ECX -> EAX
+		mov ebx, 0x6FB5A140           // ValidateSkillLevelRequirements
+		call ebx
+		mov ebx, 0x6FB59F40           // UpdateRoomLevelTracker
+		call ebx
+		pop ebx
+		ret
 	}
 }
 

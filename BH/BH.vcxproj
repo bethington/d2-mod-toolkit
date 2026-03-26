@@ -164,9 +164,11 @@
     <ClCompile Include="MemWatch.cpp" />
     <ClCompile Include="HookManager.cpp" />
     <ClCompile Include="AutoPotion.cpp" />
+    <ClCompile Include="AutoCast.cpp" />
     <ClCompile Include="DebugPanel.cpp" />
     <ClCompile Include="GameState.cpp" />
     <ClCompile Include="McpServer.cpp" />
+    <ClCompile Include="StreamStats.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\imgui.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\imgui_draw.cpp" />
     <ClCompile Include="..\ThirdParty\imgui\imgui_tables.cpp" />

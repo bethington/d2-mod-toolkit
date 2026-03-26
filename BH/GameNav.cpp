@@ -1,4 +1,5 @@
 #include "GameNav.h"
+#include "GameState.h"
 #include "D2Ptrs.h"
 #include "D2Helpers.h"
 

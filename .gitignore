@@ -39,3 +39,18 @@ Release/*
 /BH.VC.db
 /.vs
 out/
+
+# Environment files with secrets
+.env
+scripts/.env
+
+# Local tool state
+.claude/
+.d2workshop/
+
+# Build artifacts
+build/
+
+# Python bytecode
+__pycache__/
+*.pyc

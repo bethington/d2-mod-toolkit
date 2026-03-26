@@ -101,11 +101,11 @@
 FUNCPTR(D2CLIENT, GetQuestInfo, void* __stdcall, (void), 0x45A00, 0x78A80)
 
 FUNCPTR(D2CLIENT, SubmitItem, void __fastcall, (DWORD dwItemId), 0x45FB0, 0x79670)
-FUNCPTR(D2CLIENT, Transmute, void __fastcall, (void), 0x8CB90, 0x94370)
+FUNCPTR(D2CLIENT, Transmute, void __fastcall, (void), 0x595C0, 0x94370) // funmixxed: 0x595C0
 
 FUNCPTR(D2CLIENT, FindClientSideUnit, UnitAny* __fastcall, (DWORD dwId, DWORD dwType), 0xA5B20, 0x620B0)
 FUNCPTR(D2CLIENT, FindServerSideUnit, UnitAny* __fastcall, (DWORD dwId, DWORD dwType), 0xA5B40, 0x620D0)
-FUNCPTR(D2CLIENT, GetCurrentInteractingNPC, UnitAny* __fastcall, (void), 0x46150, 0x790D0)
+FUNCPTR(D2CLIENT, GetCurrentInteractingNPC, UnitAny* __fastcall, (void), 0x7C5C0, 0x790D0) // funmixxed: 0x7C5C0
 FUNCPTR(D2CLIENT, GetSelectedUnit, UnitAny* __stdcall, (void), 0x51A80, 0x17280)
 FUNCPTR(D2CLIENT, GetCursorItem, UnitAny* __fastcall, (void), 0x16020, 0x144A0)
 FUNCPTR(D2CLIENT, GetMercUnit, UnitAny* __fastcall, (void), 0x97CD0, 0x9C0A0)
@@ -117,7 +117,7 @@ FUNCPTR(D2CLIENT, GetItemName, BOOL __stdcall, (UnitAny* pItem, wchar_t* wBuffer
 FUNCPTR(D2CLIENT, LoadItemDesc, BOOL __stdcall, (UnitAny* pPlayer, int type), 0x97820) // 1.13d
 
 FUNCPTR(D2CLIENT, GetMonsterOwner, DWORD __fastcall, (DWORD nMonsterId), 0x216A0, 0x8E3D0)
-FUNCPTR(D2CLIENT, GetUnitHPPercent, DWORD __fastcall, (DWORD dwUnitId), 0x21580, 0x8E2B0)
+FUNCPTR(D2CLIENT, GetUnitHPPercent, DWORD __fastcall, (DWORD dwUnitId), 0x21590, 0x8E2B0) // funmixxed: 0x21590
 FUNCPTR(D2CLIENT, InitInventory, void __fastcall, (void), 0x908C0, 0x93280)
 FUNCPTR(D2CLIENT, SetUIVar, DWORD __fastcall, (DWORD varno, DWORD howset, DWORD unknown1), 0xC2790, 0x1C190)
 FUNCPTR(D2CLIENT, GetUnitX, int __fastcall, (UnitAny* pUnit), 0x1630, 0x1210)
@@ -125,11 +125,11 @@ FUNCPTR(D2CLIENT, GetUnitY, int __fastcall, (UnitAny* pUnit), 0x1660, 0x1240)
 
 FUNCPTR(D2CLIENT, ShopAction, void __fastcall, (UnitAny* pItem, UnitAny* pNpc, UnitAny* pNpc2, DWORD dwSell, DWORD dwItemCost, DWORD dwMode, DWORD _2, DWORD _3), 0x47D60, 0x7D030)
 
-FUNCPTR(D2CLIENT, CloseNPCInteract, void __fastcall, (void), 0x492F0, 0x7BC10)
+FUNCPTR(D2CLIENT, CloseNPCInteract, void __fastcall, (void), 0x48350, 0x7BC10) // funmixxed: 0x48350
 //FUNCPTR(D2CLIENT, ClearScreen, void __fastcall, (void), 0x492F0) // unused but I want to look into using it // wrong function
 FUNCPTR(D2CLIENT, CloseInteract, void __fastcall, (void), 0x43870, 0x44980)
 
-FUNCPTR(D2CLIENT, GetAutomapSize, DWORD __stdcall, (void), 0x5F080, 0x6FDD0)
+FUNCPTR(D2CLIENT, GetAutomapSize, DWORD __stdcall, (void), 0x5F970, 0x6FDD0) // funmixxed: 0x5F970
 FUNCPTR(D2CLIENT, NewAutomapCell, AutomapCell* __fastcall, (void), 0x5F6B0, 0x703C0)
 FUNCPTR(D2CLIENT, AddAutomapCell, void __fastcall, (AutomapCell* aCell, AutomapCell** node), 0x61320, 0x71EA0)
 FUNCPTR(D2CLIENT, RevealAutomapRoom, void __stdcall, (Room1* pRoom1, DWORD dwClipFlag, AutomapLayer* aLayer), 0x62580, 0x73160)
@@ -147,11 +147,11 @@ FUNCPTR(D2CLIENT, PrintGameString, void __stdcall, (wchar_t* wMessage, int nColo
 FUNCPTR(D2CLIENT, LeaveParty, void __fastcall, (void), 0x9E5D0, 0xA26A0)
 
 FUNCPTR(D2CLIENT, AcceptTrade, void __fastcall, (void), 0x59600, 0x11F70)
-FUNCPTR(D2CLIENT, CancelTrade, void __fastcall, (void), 0x595C0, 0x11F30)
+FUNCPTR(D2CLIENT, CancelTrade, void __fastcall, (void), 0x8CB90, 0x11F30) // funmixxed: 0x8CB90
 
 FUNCPTR(D2CLIENT, GetDifficulty, BYTE __stdcall, (void), 0x41930, 0x42980)
 
-FUNCPTR(D2CLIENT, ExitGame, void __fastcall, (void), 0x42850, 0x43870)
+FUNCPTR(D2CLIENT, ExitGame, void __fastcall, (void), 0x42850, 0x42850)
 
 FUNCPTR(D2CLIENT, GetUiVar_I, DWORD __fastcall, (DWORD dwVarNo), 0xBE400, 0x17C50)
 
@@ -162,6 +162,15 @@ FUNCPTR(D2CLIENT, PerformGoldDialogAction, void __fastcall, (void), 0xBFDF0, 0x1
 FUNCPTR(D2CLIENT, GetPlayerUnit, UnitAny* __stdcall, (void), 0xA4D60, 0x613C0)
 
 FUNCPTR(D2CLIENT, GetLevelName_I, wchar_t* __fastcall, (DWORD levelId), 0xBE240, 0x18250)
+
+// From funmixxed — PD2-verified functions for combat, town, items
+FUNCPTR(D2CLIENT, Attack, void __stdcall, (AttackStruct* pAttack, BOOL bAttackingUnit), 0x1A060, 0x1A060) // Direct combat
+FUNCPTR(D2CLIENT, GetGameInfo, GameStructInfo* __stdcall, (void), 0x108B0, 0x108B0)
+// FUNCPTR(D2CLIENT, GetMonsterTxt, MonsterTxt* __fastcall, (DWORD monno), 0x1230, 0x1230) // needs MonsterTxt struct
+FUNCPTR(D2CLIENT, PrintGameString2, void __stdcall, (char* szMessage), 0x7F780, 0x7F780)
+FUNCPTR(D2CLIENT, ClearScreen, void __fastcall, (void), 0x492F0, 0x492F0) // funmixxed: close all panels
+FUNCPTR(D2CLIENT, FixShopActions, void __fastcall, (void), 0x47AB0, 0x47AB0)
+FUNCPTR(D2CLIENT, FindServerSideUnit2, UnitAny* __fastcall, (DWORD dwId, DWORD dwType), 0x19438, 0x19438) // funmixxed alternate
 
 FUNCPTR(D2GFX, DrawAutomapCell, void __stdcall, (CellContext* context, DWORD xpos, DWORD ypos, RECT* cliprect, DWORD bright), -10079, -10060)
 ASMPTR(D2CLIENT, OverrideShrinePatch_ORIG, 0x1155B8, 0x101B08)//Updated 1.13c
@@ -314,6 +323,7 @@ ASMPTR(D2CLIENT, LoadUiImage_I, 0x2B420, 0xA9480)
 ASMPTR(D2CLIENT, GetMinionCount_I, 0x217E0, 0x8E5B0)
 
 ASMPTR(D2CLIENT, GameLeave_I, 0x5D110, 0xB4370)
+ASMPTR(D2CLIENT, SendGamePacket_I, 0x143E0, 0x143E0) // D2BS: packet sender with throttle, len in EBX
 
 ASMPTR(D2CLIENT, ClickMap_I, 0xFADA4, 0x11C8B4)
 ASMPTR(D2CLIENT, ClickMap_II, 0x11C4D8, 0x11D2CC)

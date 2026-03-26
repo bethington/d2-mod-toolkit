@@ -6,6 +6,7 @@ void GameAutomapDraw();
 void OOGDraw();
 
 void GameLoop();
+extern volatile int g_pendingExitGame; // set to 1 to trigger save&exit from game thread
 DWORD WINAPI GameThread(VOID* lpvoid);
 LONG WINAPI GameWindowEvent(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 

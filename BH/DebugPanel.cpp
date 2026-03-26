@@ -1,8 +1,13 @@
 #include "DebugPanel.h"
 #include "McpServer.h"
 #include "GameState.h"
+#include "D2Ptrs.h"
+#include "D2Helpers.h"
+#include "Constants.h"
+#include "StreamStats.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "AutoCast.h"
 #include "HookManager.h"
 #include "CrashCatcher.h"
 #include "PatchManager.h"
@@ -326,6 +331,53 @@ namespace {
         }
 
         if (ImGui::BeginTabBar("DebugTabs")) {
+            // Common colors for all tabs
+            ImVec4 cGold(0.85f, 0.72f, 0.45f, 1.0f);
+            ImVec4 cWhite(1.0f, 1.0f, 1.0f, 1.0f);
+            ImVec4 cGray6(0.6f, 0.6f, 0.6f, 1.0f);
+            ImVec4 cRed(1.0f, 0.3f, 0.3f, 1.0f);
+            ImVec4 cGreen(0.3f, 1.0f, 0.3f, 1.0f);
+            ImVec4 cBlue(0.4f, 0.6f, 1.0f, 1.0f);
+            ImVec4 cYellow(1.0f, 1.0f, 0.3f, 1.0f);
+
+            // === STREAM TAB (default, visible to audience) ===
+            if (ImGui::BeginTabItem("Stream")) {
+                auto ss = StreamStats::GetStats();
+                DWORD elapsed = (GetTickCount() - ss.sessionStartTime) / 1000;
+                int hours = elapsed / 3600, mins = (elapsed % 3600) / 60, secs = elapsed % 60;
+
+                // Line 1: AI Status (big and colorful)
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.5f, 1.0f), "AI:"); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "%s", ss.status);
+                ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("00:00:00").x);
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%02d:%02d:%02d", hours, mins, secs);
+
+                // Line 2: Core stats — Deaths | Kills | Items | Uniques
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Deaths:%d", ss.deaths); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), " Kills:%d", ss.monstersKilled); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), " Loot:%d", ss.itemsPickedUp); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), " Uniques:%d", ss.uniquesFound); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), " Chickens:%d", ss.chickens);
+
+                // Line 3: Run info
+                ImGui::TextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), "Runs:%d", ss.runsCompleted); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), " Games:%d", ss.gamesEntered); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), " Vendored:%d", ss.itemsVendored);
+                if (ss.lastRunSeconds > 0) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), " Last:%.0fs", ss.lastRunSeconds);
+                }
+
+                // Line 4: Last event
+                ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.3f, 1.0f), ">"); ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "%s", ss.lastEvent);
+
+                // Line 5: Fun/audience message
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", ss.funMessage);
+
+                ImGui::EndTabItem();
+            }
+
             if (ImGui::BeginTabItem("Player")) {
                 if (!GameState::IsGameReady()) {
                     ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Not in game");
@@ -358,10 +410,19 @@ namespace {
                     ImGui::SameLine(rightEdge - ImGui::CalcTextSize(levelBuf).x);
                     ImGui::TextColored(cGold, "%s", levelBuf);
 
-                    // XP and area info (line 2)
-                    char xpBuf[64]; snprintf(xpBuf, sizeof(xpBuf), "XP: %.2f%% / Additional XP: %d%%", ps.xpPctToNext, ps.addXp);
-                    ImGui::SetCursorPosX(rightEdge - ImGui::CalcTextSize(xpBuf).x);
-                    ImGui::TextColored(cGold, "%s", xpBuf);
+                    // XP and session stats (same line)
+                    {
+                        auto ss = GameState::GetSessionStats();
+                        ImGui::TextColored(cGold, "Deaths:"); ImGui::SameLine();
+                        ImGui::TextColored(ss.deaths > 0 ? cRed : cGreen, "%d", ss.deaths);
+                        ImGui::SameLine();
+                        ImGui::TextColored(cGold, "  Games:"); ImGui::SameLine();
+                        ImGui::Text("%d", ss.gamesEntered);
+
+                        char xpBuf[64]; snprintf(xpBuf, sizeof(xpBuf), "XP: %.2f%% / Additional XP: %d%%", ps.xpPctToNext, ps.addXp);
+                        ImGui::SameLine(rightEdge - ImGui::CalcTextSize(xpBuf).x);
+                        ImGui::TextColored(cGold, "%s", xpBuf);
+                    }
 
                     // Area and player count (line 3)
                     ImGui::TextColored(cGold, "Area:"); ImGui::SameLine();
@@ -369,6 +430,7 @@ namespace {
                     char playerBuf[32]; snprintf(playerBuf, sizeof(playerBuf), "Players: %d", ps.playerCount);
                     ImGui::SameLine(rightEdge - ImGui::CalcTextSize(playerBuf).x);
                     ImGui::TextColored(cGold, "%s", playerBuf);
+                    ImGui::Separator();
 
                     // -- Resistances --
                     ImGui::TextColored(cRed, "Fire Resist:"); ImGui::SameLine();
@@ -655,6 +717,185 @@ namespace {
                             App.autoPickup.maxDistance.value = auc.maxDistance;
                             App.autoPickup.pickTpScrolls.value = auc.pickTpScrolls;
                             App.autoPickup.pickIdScrolls.value = auc.pickIdScrolls;
+                        }
+                    }
+
+                    // -- Auto-Cast Controls --
+                    {
+                        auto acc = AutoCast::GetConfig();
+                        bool changed = false;
+
+                        // Line 1: Auto-Cast: [✓] R: [skill▼] backup: [skill▼]  [✓] L: [skill▼]
+                        ImGui::TextColored(cGold, "Auto-Cast:"); ImGui::SameLine();
+                        if (ImGui::Checkbox("##acEnable", &acc.enabled)) changed = true;
+
+                        if (acc.enabled) {
+                            // Get available skills for dropdowns
+                            static std::vector<AutoCast::SkillInfo> s_skills;
+                            static DWORD s_lastSkillRefresh = 0;
+                            DWORD now = GetTickCount();
+                            if (now - s_lastSkillRefresh > 2000) {
+                                s_skills = AutoCast::GetAvailableSkills();
+                                s_lastSkillRefresh = now;
+                            }
+
+                            // Build skill name list for combos
+                            auto findSkillIdx = [&](WORD id) -> int {
+                                for (int i = 0; i < (int)s_skills.size(); i++)
+                                    if (s_skills[i].id == id) return i;
+                                return -1;
+                            };
+
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("R##acR", &acc.rightSkill.enabled)) changed = true;
+                            ImGui::SameLine();
+                            ImGui::PushItemWidth(80 * g_dpiScale);
+                            {
+                                int sel = findSkillIdx(acc.rightSkill.skillId);
+                                char preview[32] = "None";
+                                if (sel >= 0) snprintf(preview, sizeof(preview), "%d", s_skills[sel].id);
+                                if (ImGui::BeginCombo("##acRSkill", preview, ImGuiComboFlags_NoArrowButton)) {
+                                    for (int i = 0; i < (int)s_skills.size(); i++) {
+                                        char label[32]; snprintf(label, sizeof(label), "%d", s_skills[i].id);
+                                        if (ImGui::Selectable(label, sel == i)) {
+                                            acc.rightSkill.skillId = s_skills[i].id;
+                                            changed = true;
+                                        }
+                                    }
+                                    ImGui::EndCombo();
+                                }
+                            }
+                            ImGui::PopItemWidth();
+
+                            ImGui::SameLine();
+                            ImGui::TextColored(cGray, "bk:"); ImGui::SameLine();
+                            ImGui::PushItemWidth(60 * g_dpiScale);
+                            {
+                                int sel = findSkillIdx(acc.rightSkill.backupSkillId);
+                                char preview[32] = "--";
+                                if (sel >= 0) snprintf(preview, sizeof(preview), "%d", s_skills[sel].id);
+                                if (ImGui::BeginCombo("##acRBk", preview, ImGuiComboFlags_NoArrowButton)) {
+                                    if (ImGui::Selectable("None", acc.rightSkill.backupSkillId == 0)) {
+                                        acc.rightSkill.backupSkillId = 0; changed = true;
+                                    }
+                                    for (int i = 0; i < (int)s_skills.size(); i++) {
+                                        char label[32]; snprintf(label, sizeof(label), "%d", s_skills[i].id);
+                                        if (ImGui::Selectable(label, sel == i)) {
+                                            acc.rightSkill.backupSkillId = s_skills[i].id;
+                                            changed = true;
+                                        }
+                                    }
+                                    ImGui::EndCombo();
+                                }
+                            }
+                            ImGui::PopItemWidth();
+
+                            ImGui::SameLine();
+                            ImGui::Text(" ");
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("L##acL", &acc.leftSkill.enabled)) changed = true;
+                            ImGui::SameLine();
+                            ImGui::PushItemWidth(80 * g_dpiScale);
+                            {
+                                int sel = findSkillIdx(acc.leftSkill.skillId);
+                                char preview[32] = "None";
+                                if (sel >= 0) snprintf(preview, sizeof(preview), "%d", s_skills[sel].id);
+                                if (ImGui::BeginCombo("##acLSkill", preview, ImGuiComboFlags_NoArrowButton)) {
+                                    for (int i = 0; i < (int)s_skills.size(); i++) {
+                                        char label[32]; snprintf(label, sizeof(label), "%d", s_skills[i].id);
+                                        if (ImGui::Selectable(label, sel == i)) {
+                                            acc.leftSkill.skillId = s_skills[i].id;
+                                            changed = true;
+                                        }
+                                    }
+                                    ImGui::EndCombo();
+                                }
+                            }
+                            ImGui::PopItemWidth();
+
+                            // Line 2: Range: [==25==]  Priority: [Nearest▼]  Mana: [==20%==]  [✓] Moving
+                            ImGui::TextColored(cGold, "  Range:"); ImGui::SameLine();
+                            ImGui::PushItemWidth(60 * g_dpiScale);
+                            if (ImGui::InputInt("##acRange", &acc.castRange, 0, 0)) changed = true;
+                            ImGui::PopItemWidth();
+
+                            ImGui::SameLine();
+                            ImGui::TextColored(cGold, " Pri:"); ImGui::SameLine();
+                            ImGui::PushItemWidth(100 * g_dpiScale);
+                            {
+                                int priIdx = (int)acc.priority;
+                                if (ImGui::Combo("##acPri", &priIdx, AutoCast::TargetPriorityNames, (int)AutoCast::TargetPriority::COUNT)) {
+                                    acc.priority = (AutoCast::TargetPriority)priIdx;
+                                    changed = true;
+                                }
+                            }
+                            ImGui::PopItemWidth();
+
+                            ImGui::SameLine();
+                            ImGui::TextColored(cBlue, " Mana:"); ImGui::SameLine();
+                            ImGui::PushItemWidth(45 * g_dpiScale);
+                            if (ImGui::InputInt("##acMana", &acc.manaReservePct, 0, 0)) changed = true;
+                            ImGui::PopItemWidth();
+                            ImGui::SameLine(); ImGui::Text("%%");
+
+                            ImGui::SameLine();
+                            if (ImGui::Checkbox("Moving##acMove", &acc.castWhileMoving)) changed = true;
+
+                            // Line 3: Auto-Buff slots
+                            if (!acc.buffs.empty()) {
+                                ImGui::TextColored(cGold, "  Auto-Buff:");
+                                for (int b = 0; b < (int)acc.buffs.size(); b++) {
+                                    ImGui::SameLine();
+                                    char cbId[16]; snprintf(cbId, sizeof(cbId), "##ab%d", b);
+                                    if (ImGui::Checkbox(cbId, &acc.buffs[b].enabled)) changed = true;
+                                    ImGui::SameLine();
+                                    ImGui::PushItemWidth(60 * g_dpiScale);
+                                    char comboId[16]; snprintf(comboId, sizeof(comboId), "##abs%d", b);
+                                    {
+                                        int sel = findSkillIdx(acc.buffs[b].skillId);
+                                        char preview[32] = "--";
+                                        if (sel >= 0) snprintf(preview, sizeof(preview), "%d", s_skills[sel].id);
+                                        if (ImGui::BeginCombo(comboId, preview, ImGuiComboFlags_NoArrowButton)) {
+                                            for (int i = 0; i < (int)s_skills.size(); i++) {
+                                                char label[32]; snprintf(label, sizeof(label), "%d", s_skills[i].id);
+                                                if (ImGui::Selectable(label, sel == i)) {
+                                                    acc.buffs[b].skillId = s_skills[i].id;
+                                                    changed = true;
+                                                }
+                                            }
+                                            ImGui::EndCombo();
+                                        }
+                                    }
+                                    ImGui::PopItemWidth();
+                                    if (acc.buffs[b].enabled && acc.buffs[b].lastCastTick > 0) {
+                                        DWORD elapsed = (GetTickCount() - acc.buffs[b].lastCastTick) / 1000;
+                                        ImGui::SameLine();
+                                        ImGui::TextColored(cGray, "(%ds)", elapsed);
+                                    }
+                                }
+                            }
+
+                            // + button to add buff slot
+                            if (acc.buffs.size() < 6) {
+                                if (!acc.buffs.empty()) ImGui::SameLine();
+                                else { ImGui::TextColored(cGold, "  Auto-Buff:"); ImGui::SameLine(); }
+                                char addId[16]; snprintf(addId, sizeof(addId), "+##addBuff");
+                                if (ImGui::SmallButton(addId)) {
+                                    AutoCast::BuffSlot slot;
+                                    slot.enabled = false;
+                                    slot.durationSec = 120; // default 2 min
+                                    acc.buffs.push_back(slot);
+                                    changed = true;
+                                }
+                            }
+                        }
+
+                        if (changed) {
+                            if (acc.castRange < 1) acc.castRange = 1;
+                            if (acc.castRange > 50) acc.castRange = 50;
+                            if (acc.manaReservePct < 0) acc.manaReservePct = 0;
+                            if (acc.manaReservePct > 95) acc.manaReservePct = 95;
+                            AutoCast::SetConfig(acc);
                         }
                     }
 
@@ -1040,165 +1281,517 @@ namespace {
                 }
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Stash")) {
-                ImVec4 cGold6(0.85f, 0.72f, 0.45f, 1.0f);
-                ImVec4 cGray6(0.6f, 0.6f, 0.6f, 1.0f);
-                ImVec4 cGreen6(0.4f, 1.0f, 0.4f, 1.0f);
+            // === INVENTORY TAB ===
+            if (ImGui::BeginTabItem("Inventory")) {
+                if (!GameState::IsGameReady()) {
+                    ImGui::TextColored(cGray6, "Not in game.");
+                } else {
+                    UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                    if (pPlayer && pPlayer->pInventory) {
+                        // Scan all items once
+                        struct InvItem {
+                            DWORD unitId; int code; char name[64]; char category[32];
+                            int gridX, gridY; int bodyLoc; int itemLoc; int nodePage;
+                            int quality;
+                        };
+                        static std::vector<InvItem> equippedItems;
+                        static std::vector<InvItem> backpackItems;
+                        static std::vector<InvItem> cubeItems;
+                        static DWORD lastScanTick = 0;
 
-                // Read current tab index from PlayerData+0x1B4
-                int currentTab = -1;
-                if (GameState::IsGameReady()) {
-                    try {
-                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
-                        if (pPlayer && pPlayer->pPlayerData) {
-                            // PlayerData is at pPlayer+0x14, tab at +0x1B4
-                            DWORD pdataAddr = (DWORD)pPlayer->pPlayerData;
-                            if (pdataAddr > 0x10000) {
-                                currentTab = *(int*)(pdataAddr + 0x1B4);
-                            }
-                        }
-                    } catch (...) {}
-                }
+                        // Rescan every 500ms when tab is visible
+                        DWORD now = GetTickCount();
+                        if (now - lastScanTick > 500) {
+                            lastScanTick = now;
+                            equippedItems.clear();
+                            backpackItems.clear();
+                            cubeItems.clear();
 
-                // Tab selector buttons
-                const char* tabLabels[] = {"P", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "M"};
-                for (int t = 0; t < 11; t++) {
-                    if (t > 0) ImGui::SameLine();
-                    bool isActive = (currentTab == t);
-                    if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
-                    if (ImGui::SmallButton(tabLabels[t])) {
-                        // Switch tab via PD2's internal click handler functions
-                        if (t != currentTab) {
-                            static const DWORD tabHandlerRVA[] = {
-                                0x001906c0, 0x00190700, 0x00190740, 0x00190780, 0x001907c0,
-                                0x00190800, 0x00190840, 0x00190880, 0x001908c0, 0x00190900,
-                            };
-                            HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
-                            if (hPD2) {
-                                GameCallQueue::PendingCall call = {};
-                                if (t <= 9) {
-                                    call.address = (DWORD)hPD2 + tabHandlerRVA[t];
-                                    call.argCount = 0;
-                                    call.convention = 1; // cdecl
-                                } else {
-                                    // Materials tab: use same packet dispatch as other handlers
-                                    // but must be called from game thread with correct asm
-                                    struct MatTabHelper {
-                                        static DWORD __cdecl Switch() {
-                                            HMODULE pd2 = GetModuleHandle("ProjectDiablo.dll");
-                                            if (!pd2) return 0;
-                                            DWORD* pSt = (DWORD*)(*(DWORD*)((DWORD)pd2 + 0x00410688));
-                                            if (*pSt != 0x0C) return 0;
-                                            DWORD* pTab = (DWORD*)((DWORD)pd2 + 0x0040edd4);
-                                            if (*pTab == 10) return 0;
-                                            DWORD* pPend = (DWORD*)((DWORD)pd2 + 0x0030de48);
-                                            if (*pPend != 0) return 0;
-                                            DWORD dAddr = (DWORD)pd2 + 0x0023ead0;
-                                            WORD pkt = 0x0B55;
-                                            __asm {
-                                                lea ecx, pkt
-                                                mov edx, 2
-                                                call dAddr
-                                            }
-                                            return 1;
-                                        }
-                                    };
-                                    call.address = (DWORD)&MatTabHelper::Switch;
-                                    call.argCount = 0;
-                                    call.convention = 1;
-                                }
-                                GameCallQueue::CallOnGameThread(call, 3000);
-                                Sleep(300);
-                            }
-                        }
-
-                        g_stashScanTab = t;
-                        g_stashScanItems.clear();
-
-                        // Read current tab items
-                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
-                        if (pPlayer && pPlayer->pInventory) {
                             UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
                             while (pItem) {
-                                if (pItem->pItemData && pItem->pItemData->ItemLocation == 4) { // STORAGE_STASH
-                                    StashItem si = {};
-                                    si.unitId = pItem->dwUnitId;
-                                    si.code = pItem->dwTxtFileNo;
-                                    si.tab = t;
+                                if (pItem->pItemData) {
+                                    InvItem ii = {};
+                                    ii.unitId = pItem->dwUnitId;
+                                    ii.code = pItem->dwTxtFileNo;
+                                    ii.nodePage = pItem->pItemData->NodePage;
+                                    ii.bodyLoc = pItem->pItemData->BodyLocation;
+                                    ii.itemLoc = pItem->pItemData->ItemLocation;
+                                    ii.quality = pItem->pItemData->dwQuality;
                                     if (pItem->pPath) {
                                         ItemPath* ip = (ItemPath*)pItem->pPath;
-                                        si.gridX = (int)ip->dwPosX;
-                                        si.gridY = (int)ip->dwPosY;
+                                        ii.gridX = (int)ip->dwPosX;
+                                        ii.gridY = (int)ip->dwPosY;
                                     }
-                                    char itemName[64] = {};
-                                    try {
-                                        wchar_t* wName = D2CLIENT_GetUnitName(pItem);
-                                        if (wName) WideCharToMultiByte(CP_UTF8, 0, wName, -1, itemName, sizeof(itemName)-1, nullptr, nullptr);
-                                    } catch (...) {}
-                                    strncpy_s(si.name, itemName[0] ? itemName : "?", sizeof(si.name));
-                                    strncpy_s(si.category, CategorizeItemName(si.name), sizeof(si.category));
-                                    g_stashScanItems.push_back(si);
+                                    wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+                                    if (wName) WideCharToMultiByte(CP_UTF8, 0, wName, -1, ii.name, sizeof(ii.name)-1, nullptr, nullptr);
+                                    if (!ii.name[0]) snprintf(ii.name, sizeof(ii.name), "Item #%d", ii.code);
+
+                                    if (ii.nodePage == NODEPAGE_EQUIP) {
+                                        equippedItems.push_back(ii);
+                                    } else if (ii.nodePage == NODEPAGE_STORAGE && ii.itemLoc == 0) {
+                                        backpackItems.push_back(ii);
+                                    } else if (ii.nodePage == NODEPAGE_STORAGE && ii.itemLoc == 3) {
+                                        cubeItems.push_back(ii);
+                                    }
                                 }
                                 pItem = D2COMMON_GetNextItemFromInventory(pItem);
                             }
                         }
-                    }
-                    if (isActive) ImGui::PopStyleColor();
-                }
 
-                ImGui::SameLine();
-                ImGui::TextColored(cGold6, " Tab: %d", currentTab);
-                ImGui::SameLine();
-                ImGui::TextColored(cGray6, "(%d items cached)", (int)g_stashScanItems.size());
+                        // Quality colors
+                        auto qualityColor = [](int q) -> ImVec4 {
+                            switch(q) {
+                                case 1: return ImVec4(0.6f,0.6f,0.6f,1); // inferior
+                                case 3: return ImVec4(0.7f,0.7f,0.7f,1); // superior
+                                case 4: return ImVec4(0.3f,0.5f,1.0f,1); // magic
+                                case 5: return ImVec4(0.0f,0.8f,0.0f,1); // set
+                                case 6: return ImVec4(1.0f,1.0f,0.3f,1); // rare
+                                case 7: return ImVec4(0.85f,0.72f,0.45f,1); // unique
+                                case 8: return ImVec4(1.0f,0.6f,0.2f,1); // crafted
+                                default: return ImVec4(1,1,1,1); // normal/other
+                            }
+                        };
 
-                ImGui::Separator();
+                        // --- EQUIPPED SECTION ---
+                        ImGui::TextColored(cGold, "Equipped (%d)", (int)equippedItems.size());
+                        if (!equippedItems.empty()) {
+                            static const char* slotNames[] = {
+                                "None", "Head", "Amulet", "Body", "Right Hand", "Left Hand",
+                                "Right Ring", "Left Ring", "Belt", "Feet", "Gloves",
+                                "Right Swap", "Left Swap"
+                            };
 
-                // Display items grouped by category
-                if (!g_stashScanItems.empty()) {
-                    // Build category groups
-                    std::map<std::string, std::vector<const StashItem*>> groups;
-                    for (auto& si : g_stashScanItems) {
-                        groups[si.category].push_back(&si);
-                    }
+                            if (ImGui::BeginTable("Equipped", 3,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                                ImGui::TableSetupColumn("Slot", 0, 1.0f);
+                                ImGui::TableSetupColumn("Item", 0, 2.5f);
+                                ImGui::TableSetupColumn("ID", 0, 0.5f);
+                                ImGui::TableHeadersRow();
 
-                    if (ImGui::BeginTable("StashItems", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
-                        ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
-                        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-                        ImGui::TableSetupColumn("Pos", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
-                        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 40 * g_dpiScale);
-                        ImGui::TableHeadersRow();
-
-                        for (auto& kv : groups) {
-                            // Category header row
-                            ImGui::TableNextRow();
-                            ImGui::TableNextColumn();
-                            ImGui::TextColored(cGold6, "%s (%d)", kv.first.c_str(), (int)kv.second.size());
-                            ImGui::TableNextColumn();
-                            ImGui::TableNextColumn();
-                            ImGui::TableNextColumn();
-
-                            // Items in category
-                            for (auto* si : kv.second) {
-                                ImGui::TableNextRow();
-                                ImGui::TableNextColumn();
-                                ImGui::TextColored(cGray6, "  ");
-                                ImGui::TableNextColumn();
-                                ImGui::Text("%s", si->name);
-                                ImGui::TableNextColumn();
-                                ImGui::Text("(%d,%d)", si->gridX, si->gridY);
-                                ImGui::TableNextColumn();
-                                ImGui::Text("%d", si->unitId);
+                                // Sort by body location
+                                for (int slot = 1; slot <= 12; slot++) {
+                                    for (auto& item : equippedItems) {
+                                        if (item.bodyLoc != slot) continue;
+                                        ImGui::TableNextRow();
+                                        ImGui::TableNextColumn();
+                                        ImGui::TextColored(cGray6, "%s", (slot >= 0 && slot <= 12) ? slotNames[slot] : "?");
+                                        ImGui::TableNextColumn();
+                                        ImGui::TextColored(qualityColor(item.quality), "%s", item.name);
+                                        ImGui::TableNextColumn();
+                                        ImGui::TextColored(cGray6, "%d", item.unitId);
+                                    }
+                                }
+                                ImGui::EndTable();
                             }
                         }
-                        ImGui::EndTable();
-                    }
-                } else {
-                    ImGui::TextColored(cGray6, "Click a tab button above to load items.");
-                    ImGui::TextColored(cGray6, "Stash must be open in-game.");
-                }
 
+                        ImGui::Spacing();
+
+                        // --- BACKPACK SECTION ---
+                        ImGui::TextColored(cGold, "Backpack (%d)", (int)backpackItems.size());
+                        if (!backpackItems.empty()) {
+                            if (ImGui::BeginTable("Backpack", 4,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                                ImGui::TableSetupColumn("Item", 0, 2.5f);
+                                ImGui::TableSetupColumn("Pos", 0, 0.6f);
+                                ImGui::TableSetupColumn("Quality", 0, 0.7f);
+                                ImGui::TableSetupColumn("ID", 0, 0.5f);
+                                ImGui::TableHeadersRow();
+
+                                for (auto& item : backpackItems) {
+                                    ImGui::TableNextRow();
+                                    ImGui::TableNextColumn();
+                                    ImGui::TextColored(qualityColor(item.quality), "%s", item.name);
+                                    ImGui::TableNextColumn();
+                                    ImGui::Text("(%d,%d)", item.gridX, item.gridY);
+                                    ImGui::TableNextColumn();
+                                    static const char* qualNames[] = {"?","Inferior","Normal","Superior","Magic","Set","Rare","Unique","Crafted"};
+                                    int qi = item.quality;
+                                    ImGui::TextColored(qualityColor(qi), "%s", (qi >= 0 && qi <= 8) ? qualNames[qi] : "?");
+                                    ImGui::TableNextColumn();
+                                    ImGui::TextColored(cGray6, "%d", item.unitId);
+                                }
+                                ImGui::EndTable();
+                            }
+                        } else {
+                            ImGui::TextColored(cGray6, "  Empty");
+                        }
+
+                        ImGui::Spacing();
+
+                        // --- CUBE SECTION ---
+                        ImGui::TextColored(cGold, "Cube (%d)", (int)cubeItems.size());
+                        if (!cubeItems.empty()) {
+                            if (ImGui::BeginTable("Cube", 4,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                                ImGui::TableSetupColumn("Item", 0, 2.5f);
+                                ImGui::TableSetupColumn("Pos", 0, 0.6f);
+                                ImGui::TableSetupColumn("Quality", 0, 0.7f);
+                                ImGui::TableSetupColumn("ID", 0, 0.5f);
+                                ImGui::TableHeadersRow();
+
+                                for (auto& item : cubeItems) {
+                                    ImGui::TableNextRow();
+                                    ImGui::TableNextColumn();
+                                    ImGui::TextColored(qualityColor(item.quality), "%s", item.name);
+                                    ImGui::TableNextColumn();
+                                    ImGui::Text("(%d,%d)", item.gridX, item.gridY);
+                                    ImGui::TableNextColumn();
+                                    static const char* qualNames[] = {"?","Inferior","Normal","Superior","Magic","Set","Rare","Unique","Crafted"};
+                                    int qi = item.quality;
+                                    ImGui::TextColored(qualityColor(qi), "%s", (qi >= 0 && qi <= 8) ? qualNames[qi] : "?");
+                                    ImGui::TableNextColumn();
+                                    ImGui::TextColored(cGray6, "%d", item.unitId);
+                                }
+                                ImGui::EndTable();
+                            }
+                        } else {
+                            ImGui::TextColored(cGray6, "  Empty");
+                        }
+                    } else {
+                        ImGui::TextColored(cGray6, "No inventory data.");
+                    }
+                }
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Stash")) {
+                // Read current tab index from PlayerData+0x1B4
+                int currentTab = -1;
+                if (GameState::IsGameReady()) {
+                    UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                    if (pPlayer && pPlayer->pPlayerData) {
+                        DWORD pdataAddr = (DWORD)pPlayer->pPlayerData;
+                        if (pdataAddr > 0x10000) {
+                            currentTab = *(int*)(pdataAddr + 0x1B4);
+                        }
+                    }
+
+                    // Tab selector buttons
+                    const char* tabLabels[] = {"P", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "M"};
+                    for (int t = 0; t < 11; t++) {
+                        if (t > 0) ImGui::SameLine();
+                        bool isActive = (currentTab == t);
+                        if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.3f, 1.0f));
+                        if (ImGui::SmallButton(tabLabels[t])) {
+                            if (t != currentTab) {
+                                static const DWORD tabHandlerRVA[] = {
+                                    0x001906c0, 0x00190700, 0x00190740, 0x00190780, 0x001907c0,
+                                    0x00190800, 0x00190840, 0x00190880, 0x001908c0, 0x00190900,
+                                };
+                                HMODULE hPD2 = GetModuleHandle("ProjectDiablo.dll");
+                                if (hPD2) {
+                                    GameCallQueue::PendingCall call = {};
+                                    if (t <= 9) {
+                                        call.address = (DWORD)hPD2 + tabHandlerRVA[t];
+                                        call.argCount = 0;
+                                        call.convention = 1;
+                                    } else {
+                                        struct MatTabHelper {
+                                            static DWORD __cdecl Switch() {
+                                                HMODULE pd2 = GetModuleHandle("ProjectDiablo.dll");
+                                                if (!pd2) return 0;
+                                                DWORD* pSt = (DWORD*)(*(DWORD*)((DWORD)pd2 + 0x00410688));
+                                                if (*pSt != 0x0C) return 0;
+                                                DWORD* pTab = (DWORD*)((DWORD)pd2 + 0x0040edd4);
+                                                if (*pTab == 10) return 0;
+                                                DWORD* pPend = (DWORD*)((DWORD)pd2 + 0x0030de48);
+                                                if (*pPend != 0) return 0;
+                                                DWORD dAddr = (DWORD)pd2 + 0x0023ead0;
+                                                WORD pkt = 0x0B55;
+                                                __asm {
+                                                    lea ecx, pkt
+                                                    mov edx, 2
+                                                    call dAddr
+                                                }
+                                                return 1;
+                                            }
+                                        };
+                                        call.address = (DWORD)&MatTabHelper::Switch;
+                                        call.argCount = 0;
+                                        call.convention = 1;
+                                    }
+                                    GameCallQueue::CallOnGameThread(call, 3000);
+                                    Sleep(300);
+                                }
+                            }
+
+                            g_stashScanTab = t;
+                            g_stashScanItems.clear();
+
+                            if (pPlayer && pPlayer->pInventory) {
+                                UnitAny* pItem = D2COMMON_GetItemFromInventory(pPlayer->pInventory);
+                                while (pItem) {
+                                    if (pItem->pItemData && pItem->pItemData->ItemLocation == 4) {
+                                        StashItem si = {};
+                                        si.unitId = pItem->dwUnitId;
+                                        si.code = pItem->dwTxtFileNo;
+                                        si.tab = t;
+                                        if (pItem->pPath) {
+                                            ItemPath* ip = (ItemPath*)pItem->pPath;
+                                            si.gridX = (int)ip->dwPosX;
+                                            si.gridY = (int)ip->dwPosY;
+                                        }
+                                        char itemName[64] = {};
+                                        wchar_t* wName = D2CLIENT_GetUnitName(pItem);
+                                        if (wName) WideCharToMultiByte(CP_UTF8, 0, wName, -1, itemName, sizeof(itemName)-1, nullptr, nullptr);
+                                        strncpy_s(si.name, itemName[0] ? itemName : "?", sizeof(si.name));
+                                        strncpy_s(si.category, CategorizeItemName(si.name), sizeof(si.category));
+                                        g_stashScanItems.push_back(si);
+                                    }
+                                    pItem = D2COMMON_GetNextItemFromInventory(pItem);
+                                }
+                            }
+                        }
+                        if (isActive) ImGui::PopStyleColor();
+                    }
+
+                    ImGui::SameLine();
+                    ImGui::TextColored(cGold, " Tab: %d", currentTab);
+                    ImGui::SameLine();
+                    ImGui::TextColored(cGray6, "(%d items)", (int)g_stashScanItems.size());
+                    ImGui::Separator();
+
+                    if (!g_stashScanItems.empty()) {
+                        std::map<std::string, std::vector<const StashItem*>> groups;
+                        for (auto& si : g_stashScanItems) {
+                            groups[si.category].push_back(&si);
+                        }
+
+                        if (ImGui::BeginTable("StashItems", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                            ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed, 90 * g_dpiScale);
+                            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+                            ImGui::TableSetupColumn("Pos", ImGuiTableColumnFlags_WidthFixed, 50 * g_dpiScale);
+                            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 40 * g_dpiScale);
+                            ImGui::TableHeadersRow();
+
+                            for (auto& kv : groups) {
+                                ImGui::TableNextRow();
+                                ImGui::TableNextColumn();
+                                ImGui::TextColored(cGold, "%s (%d)", kv.first.c_str(), (int)kv.second.size());
+                                ImGui::TableNextColumn();
+                                ImGui::TableNextColumn();
+                                ImGui::TableNextColumn();
+
+                                for (auto* si : kv.second) {
+                                    ImGui::TableNextRow();
+                                    ImGui::TableNextColumn();
+                                    ImGui::TextColored(cGray6, "  ");
+                                    ImGui::TableNextColumn();
+                                    ImGui::Text("%s", si->name);
+                                    ImGui::TableNextColumn();
+                                    ImGui::Text("(%d,%d)", si->gridX, si->gridY);
+                                    ImGui::TableNextColumn();
+                                    ImGui::Text("%d", si->unitId);
+                                }
+                            }
+                            ImGui::EndTable();
+                        }
+                    } else {
+                        ImGui::TextColored(cGray6, "Click a tab button above to load items.");
+                        ImGui::TextColored(cGray6, "Stash must be open in-game.");
+                    }
+                } else {
+                    ImGui::TextColored(cGray6, "Not in game.");
+                }
+                ImGui::EndTabItem();
+            }
+            // === SKILLS TAB ===
+            if (ImGui::BeginTabItem("Skills")) {
+                if (!GameState::IsGameReady()) {
+                    ImGui::TextColored(cGray6, "Not in game.");
+                } else {
+                    UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                    if (pPlayer && pPlayer->pInfo) {
+                        // Cache skill data (refreshes each frame)
+                        struct SkillDisplay {
+                            int id; char name[64]; int base; int total;
+                            int page, row, col; bool passive, aura;
+                            char tree[32];
+                        };
+                        static SkillDisplay skills[120];
+                        static int skillCount = 0;
+                        static SkillDisplay leftSkill = {}, rightSkill = {};
+                        static char className[32] = {};
+
+                        {
+                            skillCount = 0;
+                            static const char* classNames[] = {"Amazon","Sorceress","Necromancer","Paladin","Barbarian","Druid","Assassin"};
+                            int cls = pPlayer->dwTxtFileNo;
+                            strncpy_s(className, (cls >= 0 && cls <= 6) ? classNames[cls] : "Unknown", sizeof(className));
+
+                            // Read all skills
+                            Skill* pSkill = pPlayer->pInfo->pFirstSkill;
+                            while (pSkill && skillCount < 120) {
+                                if (pSkill->pSkillInfo && pSkill->skillLevel > 0) {
+                                    auto& s = skills[skillCount];
+                                    s.id = (int)pSkill->pSkillInfo->wSkillId;
+                                    s.base = pSkill->skillLevel;
+                                    s.total = D2COMMON_GetSkillLevel(pPlayer, pSkill, TRUE);
+                                    s.passive = (((BYTE*)pSkill->pSkillInfo)[4] & 0x10) != 0;
+                                    s.aura = (((BYTE*)pSkill->pSkillInfo)[4] & 0x20) != 0;
+                                    s.name[0] = '\0';
+                                    s.page = 0; s.row = 0; s.col = 0;
+                                    s.tree[0] = '\0';
+
+                                    {
+                                        int sd = pSkill->pSkillInfo->wSkillDesc;
+                                        sgptDataTable* pDT = *p_D2COMMON_sgptDataTable;
+                                        if (sd > 0 && pDT && pDT->pSkillDescTxt) {
+                                            SkillDescTxt* pDesc = &pDT->pSkillDescTxt[sd];
+                                            if (pDesc) {
+                                                s.page = pDesc->bSkillPage;
+                                                s.row = pDesc->bSkillRow;
+                                                s.col = pDesc->bSkillColumn;
+                                                // Set tree name based on page (Sorc-specific for now)
+                                                static const char* pgNames[] = {"General", "Fire", "Lightning", "Cold"};
+                                                strncpy_s(s.tree, (s.page >= 0 && s.page <= 3) ? pgNames[s.page] : "Unknown", sizeof(s.tree));
+                                                if (pDesc->wStrName > 0) {
+                                                    wchar_t* wN = GetTblEntryByIndex(pDesc->wStrName, TBLOFFSET_STRING);
+                                                    if (wN) WideCharToMultiByte(CP_UTF8, 0, wN, -1, s.name, sizeof(s.name)-1, nullptr, nullptr);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (!s.name[0]) snprintf(s.name, sizeof(s.name), "Skill %d", s.id);
+                                    skillCount++;
+                                }
+                                pSkill = pSkill->pNextSkill;
+                            }
+
+                            // Read assigned L/R skills
+                            auto readAssigned = [&](Skill* sk, SkillDisplay& out) {
+                                out = {};
+                                if (sk && sk->pSkillInfo) {
+                                    out.id = (int)sk->pSkillInfo->wSkillId;
+                                    out.base = sk->skillLevel;
+                                    out.total = D2COMMON_GetSkillLevel(pPlayer, sk, TRUE);
+                                    {
+                                        int sd = sk->pSkillInfo->wSkillDesc;
+                                        sgptDataTable* pDT = *p_D2COMMON_sgptDataTable;
+                                        if (sd > 0 && pDT && pDT->pSkillDescTxt) {
+                                            SkillDescTxt* pDesc = &pDT->pSkillDescTxt[sd];
+                                            if (pDesc && pDesc->wStrName > 0) {
+                                                wchar_t* wN = GetTblEntryByIndex(pDesc->wStrName, TBLOFFSET_STRING);
+                                                if (wN) WideCharToMultiByte(CP_UTF8, 0, wN, -1, out.name, sizeof(out.name)-1, nullptr, nullptr);
+                                            }
+                                        }
+                                    }
+                                    if (!out.name[0]) snprintf(out.name, sizeof(out.name), "Skill %d", out.id);
+                                }
+                            };
+                            readAssigned(pPlayer->pInfo->pLeftSkill, leftSkill);
+                            readAssigned(pPlayer->pInfo->pRightSkill, rightSkill);
+                        }
+
+                        // -- Assigned Skills Header --
+                        ImGui::TextColored(cGold, "%s Skills", className);
+                        ImGui::Separator();
+
+                        ImGui::TextColored(ImVec4(0.5f,0.8f,1.0f,1), "Left Click:");
+                        ImGui::SameLine();
+                        if (leftSkill.id > 0) {
+                            ImGui::Text("%s (ID:%d) Lv:%d/%d", leftSkill.name, leftSkill.id, leftSkill.base, leftSkill.total);
+                        } else {
+                            ImGui::TextColored(cGray6, "None");
+                        }
+
+                        ImGui::TextColored(ImVec4(1.0f,0.6f,0.5f,1), "Right Click:");
+                        ImGui::SameLine();
+                        if (rightSkill.id > 0) {
+                            ImGui::Text("%s (ID:%d) Lv:%d/%d", rightSkill.name, rightSkill.id, rightSkill.base, rightSkill.total);
+                        } else {
+                            ImGui::TextColored(cGray6, "None");
+                        }
+
+                        ImGui::Separator();
+
+                        // -- Skills by Tree (separate table per tree) --
+                        static const char* treeLabels[] = {"Fire", "Lightning", "Cold"};
+                        ImVec4 treeCols[] = {cRed, cYellow, cBlue};
+
+                        for (int pg = 1; pg <= 3; pg++) {
+                            // Count skills in this tree
+                            int treeCount = 0;
+                            int treePoints = 0;
+                            for (int i = 0; i < skillCount; i++) {
+                                if (skills[i].page == pg) { treeCount++; treePoints += skills[i].base; }
+                            }
+                            if (treeCount == 0) continue;
+
+                            ImGui::TextColored(treeCols[pg-1], "%s (%d points)", treeLabels[pg-1], treePoints);
+
+                            char tableId[32];
+                            snprintf(tableId, sizeof(tableId), "tree_%d", pg);
+                            if (ImGui::BeginTable(tableId, 5,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+
+                                ImGui::TableSetupColumn("", 0, 0.2f);
+                                ImGui::TableSetupColumn("Skill", 0, 2.5f);
+                                ImGui::TableSetupColumn("Base", 0, 0.5f);
+                                ImGui::TableSetupColumn("Total", 0, 0.8f);
+                                ImGui::TableSetupColumn("Type", 0, 0.7f);
+                                ImGui::TableHeadersRow();
+
+                                // Sort by row position within tree
+                                for (int row = 0; row <= 6; row++) {
+                                    for (int col = 0; col <= 3; col++) {
+                                        for (int i = 0; i < skillCount; i++) {
+                                            auto& s = skills[i];
+                                            if (s.page != pg || s.row != row || s.col != col) continue;
+
+                                            bool isL = (s.id == leftSkill.id && leftSkill.id > 0);
+                                            bool isR = (s.id == rightSkill.id && rightSkill.id > 0);
+
+                                            ImGui::TableNextRow();
+
+                                            // Assigned
+                                            ImGui::TableNextColumn();
+                                            if (isL && isR) ImGui::TextColored(ImVec4(0.8f,0.5f,1,1), "LR");
+                                            else if (isL) ImGui::TextColored(ImVec4(0.5f,0.8f,1,1), "L");
+                                            else if (isR) ImGui::TextColored(ImVec4(1,0.6f,0.5f,1), "R");
+
+                                            // Name
+                                            ImGui::TableNextColumn();
+                                            ImVec4 nameCol = s.base > 0 ? cGold : cGray6;
+                                            if (isL || isR) nameCol = cWhite;
+                                            ImGui::TextColored(nameCol, "%s", s.name);
+
+                                            // Base
+                                            ImGui::TableNextColumn();
+                                            if (s.base > 0) ImGui::Text("%d", s.base);
+                                            else ImGui::TextColored(cGray6, "-");
+
+                                            // Total
+                                            ImGui::TableNextColumn();
+                                            if (s.total > s.base) {
+                                                ImGui::Text("%d", s.total);
+                                                ImGui::SameLine();
+                                                ImGui::TextColored(ImVec4(0.3f,0.8f,1,1), "(+%d)", s.total - s.base);
+                                            } else if (s.base > 0) {
+                                                ImGui::Text("%d", s.total);
+                                            } else {
+                                                ImGui::TextColored(cGray6, "-");
+                                            }
+
+                                            // Type
+                                            ImGui::TableNextColumn();
+                                            if (s.passive) ImGui::TextColored(ImVec4(0.6f,0.9f,0.6f,1), "Passive");
+                                            else if (s.aura) ImGui::TextColored(ImVec4(0.9f,0.9f,0.4f,1), "Aura");
+                                            else ImGui::Text("Active");
+                                        }
+                                    }
+                                }
+                                ImGui::EndTable();
+                            }
+                            ImGui::Spacing();
+                        }
+                    } else {
+                        ImGui::TextColored(cGray6, "No player/skill data.");
+                    }
+                }
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
 

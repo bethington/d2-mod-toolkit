@@ -27,6 +27,10 @@ bool RunTo(WORD x, WORD y);
 bool Interact(DWORD UnitId, DWORD UnitType);
 bool SendSyncMsg();
 
+// D2BS-style direct game function calls (must be called on game thread)
+bool ClickMap(DWORD dwClickType, int wX, int wY, BOOL bShift, UnitAny* pUnit = nullptr);
+bool ClickMapQueued(DWORD dwClickType, int wX, int wY, BOOL bShift);
+
 std::string GetItemCode(int dwTxtFileNo);
 std::string GetItemName(UnitAny* item);
 bool IsTown(DWORD levelId);

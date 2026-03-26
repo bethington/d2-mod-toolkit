@@ -30,7 +30,7 @@ except ImportError:
 GAME_DIR = r"C:\Diablo2\ProjectD2_dlls_removed"
 GAME_EXE = os.path.join(GAME_DIR, "Game.exe")
 GAME_ARGS = ["-3dfx"]
-DLL_SOURCE = r"C:\Users\benam\source\cpp\d2-mod-toolkit\BH\Release\BH.dll"
+DLL_SOURCE = r"C:\Users\benam\source\cpp\d2-mod-toolkit\Release\BH.dll"
 DLL_DEST = os.path.join(GAME_DIR, "BH.dll")
 MCP_URL = "http://127.0.0.1:21337"
 MCP_TIMEOUT = 5
@@ -227,22 +227,23 @@ def navigate_to_game(character=None):
                 _click_single_player(controls2.get("controls", []))
                 time.sleep(3)
 
+        elif screen == "create_character":
+            # Wrong screen — go back to char select
+            _click_leftmost_button(ctrl_list)
+            time.sleep(2)
+
         elif screen == "char_select":
+            # Use select_character (direct OnPress) — NEVER use launch_character (causes stuck state)
             if character:
-                # Use launch_character to directly select and launch by name
-                result = mcp_call("launch_character", {"name": character})
-                if result and result.get("status") == "launched":
-                    print(f"  Launched '{result.get('character')}' (index {result.get('index')})")
-                    time.sleep(15)  # wait for game to load
-                    return True  # skip remaining navigation
+                result = mcp_call("select_character", {"name": character}, timeout=10)
+                if result and result.get("status") == "selected":
+                    print(f"  Selected '{character}' via direct OnPress")
                 else:
-                    print(f"  launch_character failed: {result}")
-                    # Fallback to OK button
-                    _click_ok_button(ctrl_list)
-                    time.sleep(3)
-            else:
-                _click_ok_button(ctrl_list)
-                time.sleep(3)
+                    print(f"  select_character result: {result}, trying click_control fallback")
+                    _click_character(ctrl_list, character)
+                time.sleep(1)
+            _click_ok_button(ctrl_list)
+            time.sleep(3)
 
         elif screen == "difficulty":
             _click_highest_difficulty(ctrl_list)
@@ -280,6 +281,10 @@ def _identify_screen(controls):
 
     if len(controls) <= 3:
         return "loading"
+
+    # Priority 0: Create Character screen (has "Select Hero Class" text)
+    if any("select hero class" in t for t in texts):
+        return "create_character"
 
     # Priority 1: Gateway (has "SELECT GATEWAY" text)
     if any("select gateway" in t for t in texts):
@@ -335,6 +340,39 @@ def _click_ok_button(controls):
             return
 
 
+def _click_character_slot(controls, name):
+    """Select a character by calling click_control on the matching textbox.
+    Uses direct OnPress handler — no PostMessage/SendInput needed.
+    Returns True if character was found and selected."""
+    name_lower = name.lower()
+
+    for c in controls:
+        if c["type"] != "textbox" or not c.get("has_on_press"):
+            continue
+        if c.get("y", 0) < 150:  # skip header
+            continue
+        if c.get("w", 0) < 150:  # skip icon textboxes (72px wide)
+            continue
+        for t in c.get("text", []):
+            if name_lower in t.lower():
+                idx = c.get("index")
+                print(f"  Selecting '{name}' via click_control (index {idx})")
+                mcp_call("click_control", {"index": idx})
+                time.sleep(0.5)
+
+                # Verify by checking header
+                controls2 = mcp_call("get_controls")
+                if controls2:
+                    for c2 in controls2.get("controls", []):
+                        if c2["type"] == "textbox" and c2.get("y", 0) < 100 and c2.get("w", 0) > 400:
+                            header_texts = [ht.strip().lower() for ht in c2.get("text", []) if ht.strip()]
+                            if any(name_lower in ht for ht in header_texts):
+                                print(f"  Character '{name}' confirmed in header")
+                                return True
+                return True
+    return False
+
+
 def _click_character(controls, name):
     """Click a character by name in the character select."""
     name_lower = name.lower()
@@ -358,12 +396,12 @@ def _click_character(controls, name):
 
 
 def _click_highest_difficulty(controls):
-    """Click the highest available difficulty button."""
+    """Click the highest available difficulty button using click_control (direct OnPress)."""
     diff_buttons = [c for c in controls if c["type"] == "button" and c.get("has_on_press")
                     and 250 <= c["x"] <= 280 and 280 <= c["y"] <= 400]
     if diff_buttons:
         highest = max(diff_buttons, key=lambda b: b["y"])
-        print(f"  Clicking highest difficulty (index {highest['index']})")
+        print(f"  Clicking highest difficulty via click_control (index {highest['index']})")
         mcp_call("click_control", {"index": highest["index"]})
 
 

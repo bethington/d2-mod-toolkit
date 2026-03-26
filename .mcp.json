@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "ghidra-mcp": {
+      "command": "python",
+      "args": [
+        "C:/Users/benam/source/docker/re-universe/ghidra-mcp/bridge_mcp_ghidra.py"
+      ],
+      "env": {
+        "GHIDRA_SERVER_URL": "http://127.0.0.1:8089/"
+      }
+    },
     "d2-mod-toolkit": {
       "type": "sse",
       "url": "http://127.0.0.1:21337/mcp/sse"

@@ -8,11 +8,31 @@
 #include "GamePause.h"
 #include "MemWatch.h"
 #include "GameCallQueue.h"
+#include "AutoCast.h"
 #include "McpServer.h"
 
 #include <iterator>
 
+// Waypoint tab switch request from MCP thread
+// Set g_wpTabRequest to desired tab (0-4), handler runs in draw phase
+volatile int g_wpTabRequest = -1;
+volatile bool g_wpTabDone = false;
+
+static void ProcessWaypointTabSwitch() {
+	int tab = g_wpTabRequest;
+	if (tab < 0 || tab > 4) return;
+	g_wpTabRequest = -1;
+	__try {
+		*(BYTE*)0x6FBACDD6 = (BYTE)tab;
+		typedef void (*UpdateRoomLevelTrackerFn)(void);
+		UpdateRoomLevelTrackerFn fn = (UpdateRoomLevelTrackerFn)0x6FB59F00;
+		fn();
+	} __except(EXCEPTION_EXECUTE_HANDLER) {}
+	g_wpTabDone = true;
+}
+
 void GameDraw() {
+	ProcessWaypointTabSwitch();
 	__raise BH::moduleManager->OnDraw();
 	Drawing::UI::Draw();
 	Drawing::StatsDisplay::Draw();
@@ -30,10 +50,12 @@ void OOGDraw() {
 
 void GameLoop() {
 	GamePause::CheckPause(); // blocks if paused
+
 	__raise BH::moduleManager->OnLoop();
 	GameState::Update();
 	AutoPotion::Update();
 	AutoPickup::Update();
+	AutoCast::Update();
 	MemWatch::Update();
 	GameCallQueue::ProcessPending();
 	GameNav::CheckPendingExit();

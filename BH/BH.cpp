@@ -11,8 +11,10 @@
 #include "Drawing/Stats/StatsDisplay.h"
 #include "DebugPanel.h"
 #include "McpServer.h"
+#include "StreamStats.h"
 #include "AutoPotion.h"
 #include "AutoPickup.h"
+#include "AutoCast.h"
 #include "HookManager.h"
 #include "CrashCatcher.h"
 #include "StructRegistry.h"
@@ -143,6 +145,9 @@ void BH::Initialize()
 	CrashCatcher::Init();
 	HookManager::Init();
 
+	// Initialize stream stats
+	StreamStats::Init();
+
 	// Start the MCP HTTP server
 	McpServer::Init(App.debugPanel.mcpPort.value);
 
@@ -157,6 +162,9 @@ void BH::Initialize()
 		apc.skipInTown = App.autoPotion.skipInTown.value;
 		AutoPotion::SetConfig(apc);
 	}
+
+	// Initialize auto-cast
+	AutoCast::Init();
 
 	// Initialize auto-pickup from config
 	{

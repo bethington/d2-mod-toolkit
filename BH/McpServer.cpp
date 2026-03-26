@@ -15,7 +15,11 @@
 #include "GameCallQueue.h"
 #include "GamePause.h"
 #include "MemWatch.h"
+#include "StreamStats.h"
 #include "D2Ptrs.h"
+#include "D2Stubs.h"
+#include "D2Handlers.h"
+#include "AutoCast.h"
 #include "D2Helpers.h"
 #include "Constants.h"
 
@@ -43,6 +47,10 @@
 #include "../ThirdParty/nlohmann/json.hpp"
 
 using json = nlohmann::json;
+
+// Waypoint tab switch — draw-phase globals from D2Handlers.cpp
+extern volatile int g_wpTabRequest;
+extern volatile bool g_wpTabDone;
 
 namespace {
     std::thread g_thread;
@@ -334,6 +342,36 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "update_stream"},
+            {"description", "Update stream overlay stats and messages. Pass any combination of fields to update."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"status", {{"type", "string"}, {"description", "Current AI status (e.g., 'Farming WSK2', 'Vendoring')"}}},
+                    {"event", {{"type", "string"}, {"description", "Notable event (e.g., 'Found Shako!', 'Died to boss')"}}},
+                    {"message", {{"type", "string"}, {"description", "Fun/audience message"}}},
+                    {"kills", {{"type", "integer"}, {"description", "Add this many kills to counter"}}},
+                    {"items", {{"type", "integer"}, {"description", "Add this many item pickups to counter"}}},
+                    {"vendored", {{"type", "integer"}, {"description", "Add this many vendored items to counter"}}},
+                    {"uniques", {{"type", "integer"}, {"description", "Add this many unique finds to counter"}}},
+                    {"run_complete", {{"type", "boolean"}, {"description", "Mark a run as completed"}}},
+                    {"chicken", {{"type", "boolean"}, {"description", "Record a chicken (emergency exit)"}}}
+                }},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_stream_stats"},
+            {"description", "Get current stream overlay stats: deaths, kills, items, runs, session time."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", json::object()},
+                {"required", json::array()}
+            }}
+        });
+
+        tools.push_back({
             {"name", "get_game_info"},
             {"description", "Get basic information about the running Diablo II process."},
             {"inputSchema", {
@@ -388,6 +426,12 @@ namespace {
                 }},
                 {"required", json::array()}
             }}
+        });
+
+        tools.push_back({
+            {"name", "capture_screen"},
+            {"description", "Take a screenshot of the game window. Returns a base64-encoded BMP image. Use this to see what's on screen."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
         tools.push_back({
@@ -448,6 +492,34 @@ namespace {
         tools.push_back({
             {"name", "get_controls"},
             {"description", "Dump all UI controls on the current screen (buttons, editboxes, etc.) with positions and states. Useful for debugging menu navigation."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
+        });
+
+        tools.push_back({
+            {"name", "set_auto_cast"},
+            {"description", "Configure auto-cast settings. Automatically casts skills at nearby monsters. Pass only fields to change."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"enabled", {{"type", "boolean"}, {"description", "Enable/disable auto-cast globally"}}},
+                    {"right_skill", {{"type", "integer"}, {"description", "Right-click skill ID for auto-cast"}}},
+                    {"right_backup", {{"type", "integer"}, {"description", "Backup right-click skill if primary is resisted"}}},
+                    {"right_enabled", {{"type", "boolean"}, {"description", "Enable right-click auto-cast"}}},
+                    {"left_skill", {{"type", "integer"}, {"description", "Left-click skill ID for auto-cast"}}},
+                    {"left_backup", {{"type", "integer"}, {"description", "Backup left-click skill"}}},
+                    {"left_enabled", {{"type", "boolean"}, {"description", "Enable left-click auto-cast"}}},
+                    {"range", {{"type", "integer"}, {"description", "Cast range in game units (default 25)"}}},
+                    {"priority", {{"type", "string"}, {"description", "Target priority: nearest, lowest_hp, highest_hp, boss"}}},
+                    {"mana_reserve", {{"type", "integer"}, {"description", "Mana reserve % (don't cast below this)"}}},
+                    {"cast_while_moving", {{"type", "boolean"}, {"description", "Cast while teleporting/walking"}}},
+                    {"cooldown_ms", {{"type", "integer"}, {"description", "Minimum ms between casts (default 200)"}}}
+                }}
+            }}
+        });
+
+        tools.push_back({
+            {"name", "get_auto_cast"},
+            {"description", "Get current auto-cast configuration and status."},
             {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"required", json::array()}}}
         });
 
@@ -855,6 +927,20 @@ namespace {
         });
 
         tools.push_back({
+            {"name", "attack_unit"},
+            {"description", "Attack a unit using D2CLIENT_Attack(). Uses the currently selected skill. More reliable than cast_skill for targeted attacks."},
+            {"inputSchema", {
+                {"type", "object"},
+                {"properties", {
+                    {"unit_id", {{"type", "integer"}, {"description", "Target unit ID"}}},
+                    {"unit_type", {{"type", "integer"}, {"description", "Unit type (default 1=monster)"}}},
+                    {"left", {{"type", "boolean"}, {"description", "Use left click attack (default false = right click)"}}}
+                }},
+                {"required", json::array({"unit_id"})}
+            }}
+        });
+
+        tools.push_back({
             {"name", "use_waypoint"},
             {"description", "Use a waypoint to travel. Walk near waypoint first. destination = D2 area ID (1=Rogue Encampment, 2=Cold Plains, 40=Lut Gholein, 75=Kurast Docks, 109=Harrogath)."},
             {"inputSchema", {
@@ -1139,7 +1225,96 @@ namespace {
             }}
         });
 
+        tools.push_back({
+            {"name", "reveal_map"},
+            {"description", "Reveal the automap for the current level. Shows all rooms on the minimap."},
+            {"inputSchema", {{"type", "object"}, {"properties", json::object()}}}
+        });
+
         return tools;
+    }
+
+    // Base64 encoder for screenshot data
+    static std::string Base64Encode(const BYTE* data, size_t len) {
+        static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string result;
+        result.reserve(((len + 2) / 3) * 4);
+        for (size_t i = 0; i < len; i += 3) {
+            BYTE b0 = data[i];
+            BYTE b1 = (i + 1 < len) ? data[i + 1] : 0;
+            BYTE b2 = (i + 2 < len) ? data[i + 2] : 0;
+            result += table[b0 >> 2];
+            result += table[((b0 & 3) << 4) | (b1 >> 4)];
+            result += (i + 1 < len) ? table[((b1 & 0xF) << 2) | (b2 >> 6)] : '=';
+            result += (i + 2 < len) ? table[b2 & 0x3F] : '=';
+        }
+        return result;
+    }
+
+    // Capture game window as BMP, scaled down, return base64 string
+    static std::string CaptureGameWindow() {
+        HWND hwnd = D2GFX_GetHwnd();
+        if (!hwnd) return "";
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int srcW = rc.right - rc.left;
+        int srcH = rc.bottom - rc.top;
+        if (srcW <= 0 || srcH <= 0) return "";
+
+        // Scale to half resolution
+        int dstW = srcW / 2;
+        int dstH = srcH / 2;
+        if (dstW < 1) dstW = 1;
+        if (dstH < 1) dstH = 1;
+
+        HDC hdcWindow = GetDC(hwnd);
+        HDC hdcSrc = CreateCompatibleDC(hdcWindow);
+        HDC hdcDst = CreateCompatibleDC(hdcWindow);
+        HBITMAP hSrcBitmap = CreateCompatibleBitmap(hdcWindow, srcW, srcH);
+        HBITMAP hDstBitmap = CreateCompatibleBitmap(hdcWindow, dstW, dstH);
+        SelectObject(hdcSrc, hSrcBitmap);
+        SelectObject(hdcDst, hDstBitmap);
+
+        // Capture full size
+        if (!PrintWindow(hwnd, hdcSrc, PW_CLIENTONLY)) {
+            BitBlt(hdcSrc, 0, 0, srcW, srcH, hdcWindow, 0, 0, SRCCOPY);
+        }
+
+        // Scale down with high quality
+        SetStretchBltMode(hdcDst, HALFTONE);
+        StretchBlt(hdcDst, 0, 0, dstW, dstH, hdcSrc, 0, 0, srcW, srcH, SRCCOPY);
+
+        // Get bitmap data from scaled version
+        BITMAPINFOHEADER bi = {};
+        bi.biSize = sizeof(BITMAPINFOHEADER);
+        bi.biWidth = dstW;
+        bi.biHeight = -dstH; // top-down
+        bi.biPlanes = 1;
+        bi.biBitCount = 24;
+        bi.biCompression = BI_RGB;
+
+        int rowSize = ((dstW * 3 + 3) & ~3);
+        int dataSize = rowSize * dstH;
+
+        BITMAPFILEHEADER bf = {};
+        bf.bfType = 0x4D42;
+        bf.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dataSize;
+        bf.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+        std::vector<BYTE> bmpData(bf.bfSize);
+        memcpy(&bmpData[0], &bf, sizeof(bf));
+        memcpy(&bmpData[sizeof(bf)], &bi, sizeof(bi));
+        GetDIBits(hdcDst, hDstBitmap, 0, dstH, &bmpData[bf.bfOffBits], (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+
+        // Cleanup
+        DeleteObject(hSrcBitmap);
+        DeleteObject(hDstBitmap);
+        DeleteDC(hdcSrc);
+        DeleteDC(hdcDst);
+        ReleaseDC(hwnd, hdcWindow);
+
+        return Base64Encode(bmpData.data(), bmpData.size());
     }
 
     // Handle tool calls
@@ -1151,6 +1326,51 @@ namespace {
                     {"text", "pong - d2-mod-toolkit is running inside Diablo II"}
                 }}}
             };
+        }
+
+        if (name == "capture_screen") {
+            std::string b64 = CaptureGameWindow();
+            if (b64.empty()) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed to capture screen"}}}}, {"isError", true}};
+            }
+            // Return as base64 image (MCP image content type)
+            return {{"content", {
+                {{"type", "image"}, {"data", b64}, {"mimeType", "image/bmp"}}
+            }}};
+        }
+
+        if (name == "update_stream") {
+            if (arguments.contains("status")) StreamStats::SetStatus(arguments["status"].get<std::string>().c_str());
+            if (arguments.contains("event")) StreamStats::SetLastEvent(arguments["event"].get<std::string>().c_str());
+            if (arguments.contains("message")) StreamStats::SetFunMessage(arguments["message"].get<std::string>().c_str());
+            if (arguments.contains("kills")) { for (int i = 0; i < arguments["kills"].get<int>(); i++) StreamStats::RecordKill(); }
+            if (arguments.contains("items")) { for (int i = 0; i < arguments["items"].get<int>(); i++) StreamStats::RecordItemPickup(); }
+            if (arguments.contains("vendored")) { for (int i = 0; i < arguments["vendored"].get<int>(); i++) StreamStats::RecordItemVendored(); }
+            if (arguments.contains("uniques")) { for (int i = 0; i < arguments["uniques"].get<int>(); i++) StreamStats::RecordUniqueFound(); }
+            if (arguments.contains("run_complete") && arguments["run_complete"].get<bool>()) { StreamStats::RecordRunComplete(); StreamStats::StartRun(); }
+            if (arguments.contains("chicken") && arguments["chicken"].get<bool>()) StreamStats::RecordChicken();
+            return {{"content", {{{"type", "text"}, {"text", "Stream updated"}}}}};
+        }
+
+        if (name == "get_stream_stats") {
+            auto ss = StreamStats::GetStats();
+            DWORD elapsed = (GetTickCount() - ss.sessionStartTime) / 1000;
+            json info = {
+                {"deaths", ss.deaths},
+                {"games_entered", ss.gamesEntered},
+                {"monsters_killed", ss.monstersKilled},
+                {"items_picked_up", ss.itemsPickedUp},
+                {"items_vendored", ss.itemsVendored},
+                {"runs_completed", ss.runsCompleted},
+                {"uniques_found", ss.uniquesFound},
+                {"chickens", ss.chickens},
+                {"session_seconds", (int)elapsed},
+                {"last_run_seconds", ss.lastRunSeconds},
+                {"status", ss.status},
+                {"last_event", ss.lastEvent},
+                {"message", ss.funMessage}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "get_game_info") {
@@ -1297,6 +1517,13 @@ namespace {
                     {"magic", {{"min", applyMastery(ps.minMagicDmg, ps.magicMastery)}, {"max", applyMastery(ps.maxMagicDmg, ps.magicMastery)}}}
                 }},
                 {"find", {{"magic_find", ps.mf}, {"gold_find", ps.gf}}}
+            };
+
+            // Session stats
+            auto ss = GameState::GetSessionStats();
+            info["session"] = {
+                {"deaths", ss.deaths},
+                {"games_entered", ss.gamesEntered}
             };
 
             return {
@@ -1583,6 +1810,78 @@ namespace {
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
+        if (name == "set_auto_cast") {
+            auto cfg = AutoCast::GetConfig();
+
+            if (arguments.contains("enabled")) cfg.enabled = arguments["enabled"].get<bool>();
+            if (arguments.contains("right_skill")) { cfg.rightSkill.skillId = arguments["right_skill"].get<int>(); cfg.rightSkill.enabled = true; }
+            if (arguments.contains("right_backup")) cfg.rightSkill.backupSkillId = arguments["right_backup"].get<int>();
+            if (arguments.contains("right_enabled")) cfg.rightSkill.enabled = arguments["right_enabled"].get<bool>();
+            if (arguments.contains("left_skill")) { cfg.leftSkill.skillId = arguments["left_skill"].get<int>(); cfg.leftSkill.enabled = true; }
+            if (arguments.contains("left_backup")) cfg.leftSkill.backupSkillId = arguments["left_backup"].get<int>();
+            if (arguments.contains("left_enabled")) cfg.leftSkill.enabled = arguments["left_enabled"].get<bool>();
+            if (arguments.contains("range")) { cfg.castRange = arguments["range"].get<int>(); cfg.useSkillRange = false; }
+            if (arguments.contains("mana_reserve")) cfg.manaReservePct = arguments["mana_reserve"].get<int>();
+            if (arguments.contains("cast_while_moving")) cfg.castWhileMoving = arguments["cast_while_moving"].get<bool>();
+            if (arguments.contains("cooldown_ms")) cfg.castCooldownMs = arguments["cooldown_ms"].get<int>();
+            if (arguments.contains("priority")) {
+                std::string p = arguments["priority"].get<std::string>();
+                if (p == "nearest") cfg.priority = AutoCast::TargetPriority::Nearest;
+                else if (p == "lowest_hp") cfg.priority = AutoCast::TargetPriority::LowestHP;
+                else if (p == "highest_hp") cfg.priority = AutoCast::TargetPriority::HighestHP;
+                else if (p == "boss") cfg.priority = AutoCast::TargetPriority::BossPriority;
+            }
+
+            AutoCast::SetConfig(cfg);
+
+            json info = {
+                {"status", "updated"},
+                {"enabled", cfg.enabled},
+                {"right_skill", cfg.rightSkill.skillId},
+                {"right_backup", cfg.rightSkill.backupSkillId},
+                {"right_enabled", cfg.rightSkill.enabled},
+                {"left_skill", cfg.leftSkill.skillId},
+                {"left_enabled", cfg.leftSkill.enabled},
+                {"range", cfg.castRange},
+                {"mana_reserve", cfg.manaReservePct},
+                {"cast_while_moving", cfg.castWhileMoving},
+                {"cooldown_ms", cfg.castCooldownMs}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
+        if (name == "get_auto_cast") {
+            auto cfg = AutoCast::GetConfig();
+            static const char* prioNames[] = {"nearest", "lowest_hp", "highest_hp", "boss"};
+
+            json buffs = json::array();
+            for (const auto& b : cfg.buffs) {
+                buffs.push_back({
+                    {"enabled", b.enabled},
+                    {"skill_id", b.skillId},
+                    {"duration", b.durationSec},
+                    {"last_cast", b.lastCastTick}
+                });
+            }
+
+            json info = {
+                {"enabled", cfg.enabled},
+                {"right_skill", cfg.rightSkill.skillId},
+                {"right_backup", cfg.rightSkill.backupSkillId},
+                {"right_enabled", cfg.rightSkill.enabled},
+                {"left_skill", cfg.leftSkill.skillId},
+                {"left_backup", cfg.leftSkill.backupSkillId},
+                {"left_enabled", cfg.leftSkill.enabled},
+                {"range", cfg.castRange},
+                {"priority", prioNames[(int)cfg.priority]},
+                {"mana_reserve", cfg.manaReservePct},
+                {"cast_while_moving", cfg.castWhileMoving},
+                {"cooldown_ms", cfg.castCooldownMs},
+                {"buffs", buffs}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+        }
+
         if (name == "quit_game") {
             // Queue quit: if in-game, saves first, then terminates after 2 seconds
             GameNav::RequestQuitGame();
@@ -1593,10 +1892,10 @@ namespace {
             if (!GameState::IsGameReady()) {
                 return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}};
             }
-            // Queue exit to be executed on the game thread (calling D2CLIENT_ExitGame
-            // from the HTTP thread can crash)
+            // Use GameNav which calls D2CLIENT_ExitGame() on the game thread
+            // via CheckPendingExit() — same approach as D2BS
             GameNav::RequestExitGame();
-            return {{"content", {{{"type", "text"}, {"text", "Exit game queued — will save and return to menu"}}}}};
+            return {{"content", {{{"type", "text"}, {"text", "Exit game queued — returning to main menu"}}}}};
         }
 
         if (name == "get_game_state") {
@@ -1989,7 +2288,7 @@ namespace {
                     return foundIdx;
                 }
 
-                static bool Launch(int charIndex) {
+                static bool Launch(int charIndex, int difficulty = -1) {
                     __try {
                         *(DWORD*)0x6FA64DB0 = charIndex; // g_nSelectedCharIndex
                         typedef void (__stdcall *Fn)(BYTE);
@@ -2016,7 +2315,8 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", err.dump(2)}}}}, {"isError", true}};
             }
 
-            bool launched = CharLauncher::Launch(foundIdx);
+            int difficulty = arguments.value("difficulty", 2); // default Hell
+            bool launched = CharLauncher::Launch(foundIdx, difficulty);
             json info = {{"status", launched ? "launched" : "failed"},
                          {"character", chars[foundIdx].name}, {"index", foundIdx}};
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
@@ -2033,49 +2333,46 @@ namespace {
                 return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
             }
 
-            // Strategy: click each character slot, read the header text to see which
-            // character was selected, stop when we find the target.
-            // D2's char select has misaligned text rendering vs click targets.
+            // Strategy: find the character slot textbox with matching name text,
+            // call its OnPress handler directly (no SendInput/PostMessage).
 
-            // Collect all wide textbox slots (200px+ wide, y >= 150)
-            struct Slot { int x, y, w, h; };
-            Slot slots[16];
+            // Collect character slot textboxes (w >= 150, y >= 150, has OnPress)
+            // and find header textbox (y < 150)
+            struct SlotInfo { Control* ctrl; int index; };
+            SlotInfo charSlots[16];
             int slotCount = 0;
-            Control* pCtrl = *p_D2WIN_FirstControl;
-            while (pCtrl && slotCount < 16) {
-                if (pCtrl->dwType == 4 && pCtrl->dwPosY >= 150 && pCtrl->dwSizeX > 100 && pCtrl->OnPress) {
-                    slots[slotCount++] = { (int)pCtrl->dwPosX, (int)pCtrl->dwPosY,
-                                           (int)pCtrl->dwSizeX, (int)pCtrl->dwSizeY };
-                }
-                pCtrl = pCtrl->pNext;
-            }
-
-            // Find header textbox (y < 150)
             Control* pHeader = nullptr;
-            pCtrl = *p_D2WIN_FirstControl;
+            int ctrlIdx = 0;
+
+            Control* pCtrl = *p_D2WIN_FirstControl;
             while (pCtrl) {
-                if (pCtrl->dwType == 4 && pCtrl->dwPosY < 150) {
-                    pHeader = pCtrl;
-                    break;
+                if (pCtrl->dwType == 4) {
+                    if (pCtrl->dwPosY < 150) {
+                        pHeader = pCtrl;
+                    } else if (pCtrl->dwSizeX >= 150 && pCtrl->OnPress && slotCount < 16) {
+                        charSlots[slotCount++] = { pCtrl, ctrlIdx };
+                    }
                 }
                 pCtrl = pCtrl->pNext;
+                ctrlIdx++;
             }
 
-            // Helper to read header text
-            struct HeaderReader {
-                char text[256];
-                static void Read(Control* h, HeaderReader& out) {
-                    out.text[0] = 0;
-                    if (!h) return;
+            // Helper to read all text lines from a textbox control
+            struct TextReader {
+                char lines[10][128];
+                int count;
+                static void Read(Control* p, TextReader& out) {
+                    out.count = 0;
+                    if (!p) return;
                     __try {
-                        TextBox* tb = (TextBox*)h;
-                        ControlText* ct = tb->pFirstText;
-                        while (ct) {
+                        TextBox* t = (TextBox*)p;
+                        ControlText* ct = t->pFirstText;
+                        while (ct && out.count < 10) {
                             for (int f = 0; f < 5; f++) {
-                                if (ct->wText[f]) {
+                                if (ct->wText[f] && out.count < 10) {
                                     WideCharToMultiByte(CP_UTF8, 0, ct->wText[f], -1,
-                                        out.text, 255, nullptr, nullptr);
-                                    if (out.text[0]) return;
+                                        out.lines[out.count], 127, nullptr, nullptr);
+                                    if (out.lines[out.count][0]) out.count++;
                                 }
                             }
                             ct = ct->pNext;
@@ -2084,83 +2381,74 @@ namespace {
                 }
             };
 
-            // Click each slot and check header
             std::string nameLower = charName;
             for (auto& c : nameLower) c = tolower(c);
 
-            SetForegroundWindow(hWnd);
-            Sleep(200);
-
+            // First try: find slot whose text already contains the character name
+            Control* targetSlot = nullptr;
             for (int i = 0; i < slotCount; i++) {
-                int cx = slots[i].x + slots[i].w / 2;
-                int cy = slots[i].y + slots[i].h / 2;
+                TextReader tr;
+                TextReader::Read(charSlots[i].ctrl, tr);
+                for (int j = 0; j < tr.count; j++) {
+                    std::string line = tr.lines[j];
+                    for (auto& c : line) c = tolower(c);
+                    if (line.find(nameLower) != std::string::npos) {
+                        targetSlot = charSlots[i].ctrl;
+                        break;
+                    }
+                }
+                if (targetSlot) break;
+            }
 
-                POINT pt = { (LONG)cx, (LONG)cy };
-                ClientToScreen(hWnd, &pt);
-                SetCursorPos(pt.x, pt.y);
-                Sleep(50);
+            // If not found by text, click each slot via OnPress and check header
+            if (!targetSlot) {
+                for (int i = 0; i < slotCount; i++) {
+                    // Call OnPress directly — selects the character
+                    if (charSlots[i].ctrl->OnPress) {
+                        charSlots[i].ctrl->OnPress(charSlots[i].ctrl);
+                        Sleep(200);
+                    }
 
-                INPUT inputs[2] = {};
-                inputs[0].type = INPUT_MOUSE;
-                inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-                inputs[1].type = INPUT_MOUSE;
-                inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-                SendInput(1, &inputs[0], sizeof(INPUT));
-                Sleep(50);
-                SendInput(1, &inputs[1], sizeof(INPUT));
-                Sleep(300);
-
-                // Read header to see what got selected
-                HeaderReader hr;
-                HeaderReader::Read(pHeader, hr);
-
-                // Also read ALL header text lines for name matching
-                std::string headerText = hr.text;
-                // Check all text lines in header
-                bool found = false;
-                if (pHeader) {
-                    struct FullRead {
-                        char lines[10][128];
-                        int count;
-                        static void Read(Control* p, FullRead& out) {
-                            out.count = 0;
-                            __try {
-                                TextBox* t = (TextBox*)p;
-                                ControlText* ct = t->pFirstText;
-                                while (ct && out.count < 10) {
-                                    for (int f = 0; f < 5; f++) {
-                                        if (ct->wText[f] && out.count < 10) {
-                                            WideCharToMultiByte(CP_UTF8, 0, ct->wText[f], -1,
-                                                out.lines[out.count], 127, nullptr, nullptr);
-                                            if (out.lines[out.count][0]) out.count++;
-                                        }
-                                    }
-                                    ct = ct->pNext;
-                                }
-                            } __except(EXCEPTION_EXECUTE_HANDLER) {}
-                        }
-                    };
-                    FullRead fr;
-                    FullRead::Read(pHeader, fr);
-                    for (int j = 0; j < fr.count; j++) {
-                        std::string line = fr.lines[j];
+                    // Check header for name match
+                    TextReader hr;
+                    TextReader::Read(pHeader, hr);
+                    bool found = false;
+                    for (int j = 0; j < hr.count; j++) {
+                        std::string line = hr.lines[j];
                         for (auto& c : line) c = tolower(c);
                         if (line.find(nameLower) != std::string::npos) {
                             found = true;
                             break;
                         }
                     }
-                }
 
-                if (found) {
-                    json info = {{"status", "selected"}, {"character", charName},
-                                 {"slot", i}, {"click_x", cx}, {"click_y", cy},
-                                 {"header", headerText}};
-                    return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+                    if (found) {
+                        targetSlot = charSlots[i].ctrl;
+                        break;
+                    }
                 }
             }
 
-            return {{"content", {{{"type", "text"}, {"text", "Character '" + charName + "' not found after clicking all " + std::to_string(slotCount) + " slots"}}}}, {"isError", true}};
+            if (targetSlot) {
+                // Call OnPress on the found slot to select it
+                if (targetSlot->OnPress) {
+                    targetSlot->OnPress(targetSlot);
+                    Sleep(200);
+                }
+                // Verify via header
+                TextReader verify;
+                TextReader::Read(pHeader, verify);
+                std::string headerText;
+                for (int j = 0; j < verify.count; j++) {
+                    if (j > 0) headerText += " ";
+                    headerText += verify.lines[j];
+                }
+                json info = {{"status", "selected"}, {"character", charName},
+                             {"header", headerText}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            }
+
+            return {{"content", {{{"type", "text"}, {"text", "Character '" + charName + "' not found after checking " + std::to_string(slotCount) + " slots"}}}}, {"isError", true}};
         }
 
         // Click a control by index (calls OnPress directly — works at menu, no foreground needed)
@@ -2822,54 +3110,9 @@ namespace {
         }
 
         if (name == "click_screen") {
-            int x = arguments.value("x", 0);
-            int y = arguments.value("y", 0);
-            std::string method = arguments.value("method", "sendinput");
-
-            HWND hWnd = FindWindow(nullptr, "Diablo II");
-            if (!hWnd) {
-                return {{"content", {{{"type", "text"}, {"text", "Game window not found"}}}}, {"isError", true}};
-            }
-
-            if (method == "post") {
-                // PostMessage approach (doesn't work for PD2 custom UI)
-                LPARAM lParam = MAKELPARAM(x, y);
-                PostMessage(hWnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
-                Sleep(50);
-                PostMessage(hWnd, WM_LBUTTONUP, 0, lParam);
-            } else {
-                // SetCursorPos + SendInput approach
-                // SetCursorPos for precise positioning (works with multi-monitor)
-                // SendInput for click only (no absolute move which has precision issues)
-                POINT pt = { x, y };
-                ClientToScreen(hWnd, &pt);
-
-                // Move cursor directly
-                SetCursorPos(pt.x, pt.y);
-                Sleep(50);
-
-                // Bring window to foreground
-                SetForegroundWindow(hWnd);
-                Sleep(100);
-
-                // Send click at current cursor position (no MOUSEEVENTF_ABSOLUTE)
-                INPUT inputs[2] = {};
-                inputs[0].type = INPUT_MOUSE;
-                inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-                inputs[1].type = INPUT_MOUSE;
-                inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-
-                SendInput(1, &inputs[0], sizeof(INPUT));
-                Sleep(50);
-                SendInput(1, &inputs[1], sizeof(INPUT));
-
-                json info = {{"status", "clicked"}, {"x", x}, {"y", y},
-                    {"screen_x", pt.x}, {"screen_y", pt.y}, {"method", "sendinput"}};
-                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
-            }
-
-            json info = {{"status", "clicked"}, {"x", x}, {"y", y}, {"method", method}};
-            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
+            // DEPRECATED: Use click_control for UI controls or cast_skill/walk_to for in-game actions.
+            // PostMessage/SendInput are unreliable — use direct game function calls instead.
+            return {{"content", {{{"type", "text"}, {"text", "click_screen is deprecated. Use click_control for menu UI, cast_skill for in-game actions."}}}}, {"isError", true}};
         }
 
         if (name == "get_cursor_item") {
@@ -3040,33 +3283,111 @@ namespace {
         }
 
         if (name == "get_waypoints") {
-            // Read waypoint destination table at 0x6FBACD8C
-            struct WpEntry { int slot; int areaId; };
-            struct WpReader {
-                WpEntry entries[40];
+            // Read waypoint data directly from the game's live waypoint table.
+            // The table at 0x6FBACD8C has 5-byte entries: DWORD areaId + BYTE unlocked.
+            // DAT_6fbacdda = count of entries for the currently displayed act tab.
+            // If act_tab (0-4) is specified, switch tab via draw-phase hook first.
+
+            auto ps = GameState::GetPlayerState();
+            int currentArea = ps.valid ? ps.area : 0;
+            int requestedTab = arguments.value("act_tab", -1);
+
+            DWORD wpFlag = *(DWORD*)0x6FBAADD0;
+            bool panelOpen = wpFlag != 0;
+
+            struct WpLiveEntry { int areaId; bool unlocked; char name[64]; };
+            struct WpTabReader {
+                WpLiveEntry entries[20];
                 int count;
-                static void Read(WpReader& out) {
+                int actTab;
+                static void ReadCurrentTab(WpTabReader& out) {
                     out.count = 0;
+                    out.actTab = -1;
                     __try {
-                        for (int s = 0; s < 39 && out.count < 40; s++) {
-                            DWORD a = *(DWORD*)(0x6FBACD8C + s * 20);
-                            if (a > 0 && a < 200) {
-                                out.entries[out.count++] = {s, (int)a};
-                            }
+                        out.actTab = *(BYTE*)0x6FBACDD6;
+                        int n = *(BYTE*)0x6FBACDDA;
+                        if (n > 20) n = 20;
+                        BYTE* ptr = (BYTE*)0x6FBACD8C;
+                        for (int i = 0; i < n; i++) {
+                            int areaId = *(int*)(ptr + i * 5);
+                            bool unlocked = *(ptr + i * 5 + 4) != 0;
+                            out.entries[out.count] = {areaId, unlocked, {}};
+                            snprintf(out.entries[out.count].name, 63, "Area %d", areaId);
+                            out.count++;
                         }
                     } __except(EXCEPTION_EXECUTE_HANDLER) {}
                 }
             };
-            WpReader wr;
-            WpReader::Read(wr);
+            // Area ID to name lookup — hardcoded for PD2 since GetLevelName
+            // is unsafe to call from the HTTP thread
+            auto AreaName = [](int id) -> const char* {
+                static const std::map<int, const char*> names = {
+                    {1,"Rogue Encampment"},{2,"Blood Moor"},{3,"Cold Plains"},{4,"Stony Field"},
+                    {5,"Dark Wood"},{6,"Black Marsh"},{27,"Outer Cloister"},{29,"Jail Level 1"},
+                    {32,"Inner Cloister"},{35,"Catacombs Level 2"},
+                    {40,"Lut Gholein"},{42,"Dry Hills"},{43,"Far Oasis"},
+                    {44,"Lost City"},{46,"Canyon of the Magi"},{47,"Lost City (vanilla)"},
+                    {48,"Sewers Level 2"},{49,"Palace Cellar Level 1 (vanilla)"},
+                    {52,"Palace Cellar Level 1"},{57,"Halls of the Dead Level 2"},
+                    {74,"Arcane Sanctuary"},
+                    {75,"Kurast Docks"},{76,"Spider Forest"},{77,"Great Marsh"},
+                    {78,"Flayer Jungle"},{79,"Lower Kurast"},{80,"Kurast Bazaar"},
+                    {81,"Upper Kurast"},{83,"Travincal"},{101,"Durance of Hate Level 2"},
+                    {103,"The Pandemonium Fortress"},{106,"City of the Damned"},{107,"River of Flame"},
+                    {109,"Harrogath"},{111,"Frigid Highlands"},{112,"Arreat Plateau"},
+                    {113,"Crystalline Passage"},{115,"Glacial Trail"},{117,"Frozen Tundra"},
+                    {118,"Ancients' Way"},{121,"Halls of Pain (vanilla)"},{123,"Halls of Pain"},
+                    {128,"Worldstone Keep Level 2"},{129,"Worldstone Keep Level 2"},
+                };
+                auto it = names.find(id);
+                return it != names.end() ? it->second : "Unknown";
+            };
 
             json waypoints = json::array();
-            for (int i = 0; i < wr.count; i++) {
-                waypoints.push_back({{"slot", wr.entries[i].slot}, {"area_id", wr.entries[i].areaId}});
+            int totalUnlocked = 0;
+
+            if (panelOpen) {
+                if (requestedTab >= 0 && requestedTab <= 4) {
+                    // Request tab switch on the draw thread
+                    g_wpTabDone = false;
+                    g_wpTabRequest = requestedTab;
+                    // Wait for draw phase to process (up to 1s)
+                    for (int w = 0; w < 100 && !g_wpTabDone; w++) Sleep(10);
+                    Sleep(100); // extra settle time for table population
+                }
+
+                WpTabReader tab;
+                memset(&tab, 0, sizeof(tab));
+                WpTabReader::ReadCurrentTab(tab);
+                // Resolve names from static lookup
+                for (int i = 0; i < tab.count; i++) {
+                    const char* n = AreaName(tab.entries[i].areaId);
+                    if (n) strncpy(tab.entries[i].name, n, 63);
+                }
+
+                int act = tab.actTab + 1;
+                for (int i = 0; i < tab.count; i++) {
+                    bool unlocked = tab.entries[i].unlocked;
+                    bool isCurrent = (tab.entries[i].areaId == currentArea);
+                    if (isCurrent) unlocked = true;
+                    if (unlocked) totalUnlocked++;
+
+                    json wp = {
+                        {"slot", i}, {"area_id", tab.entries[i].areaId},
+                        {"act", act}, {"name", tab.entries[i].name},
+                        {"unlocked", unlocked}, {"current", isCurrent}
+                    };
+                    waypoints.push_back(wp);
+                }
             }
 
-            DWORD wpFlag = *(DWORD*)0x6FBAADD0;
-            json info = {{"count", (int)waypoints.size()}, {"panel_open", wpFlag != 0}, {"waypoints", waypoints}};
+            json info = {
+                {"count", (int)waypoints.size()},
+                {"unlocked_count", totalUnlocked},
+                {"panel_open", panelOpen},
+                {"current_area", currentArea},
+                {"waypoints", waypoints}
+            };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
@@ -3274,21 +3595,61 @@ namespace {
             }
             int skillId = arguments.value("skill_id", 0);
             bool left = arguments.value("left", false);
+            bool verify = arguments.value("verify", true);
 
-            // Packet 0x3C: {0x3C, WORD skill_id, 0x00, BYTE side, 0xFF, 0xFF, 0xFF, 0xFF}
-            BYTE packet[9] = {};
-            packet[0] = 0x3C;
+            // Step 1: Verify player has this skill (walk skill linked list)
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer || !pPlayer->pInfo) {
+                return {{"content", {{{"type", "text"}, {"text", "No player unit"}}}}, {"isError", true}};
+            }
+
+            // Check if player has the skill (SEH-safe helper)
+            struct SkillCheck {
+                static bool HasSkill(UnitAny* p, WORD id) {
+                    __try {
+                        for (Skill* s = p->pInfo->pFirstSkill; s; s = s->pNextSkill)
+                            if (s->pSkillInfo && s->pSkillInfo->wSkillId == id) return true;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                    return false;
+                }
+                static bool IsActive(UnitAny* p, WORD id, bool left) {
+                    __try {
+                        Skill* s = left ? p->pInfo->pLeftSkill : p->pInfo->pRightSkill;
+                        return s && s->pSkillInfo && s->pSkillInfo->wSkillId == id;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                    return false;
+                }
+            };
+            bool hasSkill = SkillCheck::HasSkill(pPlayer, (WORD)skillId);
+
+            if (!hasSkill) {
+                json info = {{"status", "skill_not_found"}, {"skill_id", skillId}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}, {"isError", true}};
+            }
+
+            // Step 2: Send skill switch packet (funmixxed pattern: arg1=0)
+            BYTE packet[9] = {0x3C, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF};
             *(WORD*)&packet[1] = (WORD)skillId;
-            packet[3] = 0x00;
-            packet[4] = left ? 0x80 : 0x00;
-            packet[5] = 0xFF;
-            packet[6] = 0xFF;
-            packet[7] = 0xFF;
-            packet[8] = 0xFF;
-            D2NET_SendPacket(9, 1, packet);
+            if (left) packet[4] = 0x80;
+            D2NET_SendPacket(9, 0, packet);
+
+            // Step 3: Verify skill actually changed (poll for up to 1 second)
+            bool confirmed = false;
+            if (verify) {
+                for (int i = 0; i < 20; i++) {
+                    Sleep(50);
+                    UnitAny* p = D2CLIENT_GetPlayerUnit();
+                    if (p && p->pInfo && SkillCheck::IsActive(p, (WORD)skillId, left)) {
+                        confirmed = true;
+                        break;
+                    }
+                }
+            } else {
+                confirmed = true;
+            }
 
             json info = {
-                {"status", "switched"},
+                {"status", confirmed ? "confirmed" : "sent_unconfirmed"},
                 {"skill_id", skillId},
                 {"side", left ? "left" : "right"}
             };
@@ -3305,27 +3666,97 @@ namespace {
             int unitType = arguments.value("unit_type", 1);
             bool left = arguments.value("left", false);
 
+            // Rate limiting: 500ms between casts (funmixxed pattern)
+            static DWORD s_lastCastTime = 0;
+            DWORD now = GetTickCount();
+            if (now - s_lastCastTime < 200) {
+                Sleep((int)(200 - (now - s_lastCastTime)));
+            }
+
             if (unitId >= 0) {
-                // Cast on unit: 0x06 (left) or 0x0D (right) = 9 bytes
+                // Cast on unit: 0x06 (left) or 0x0D (right)
                 BYTE packet[9] = {};
                 packet[0] = left ? 0x06 : 0x0D;
                 *(DWORD*)&packet[1] = unitType;
                 *(DWORD*)&packet[5] = unitId;
-                D2NET_SendPacket(9, 1, packet);
+                D2NET_SendPacket(9, 0, packet);
+                s_lastCastTime = GetTickCount();
                 json info = {{"status", "cast_on_unit"}, {"unit_id", unitId},
                              {"skill_side", left ? "left" : "right"}};
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             } else {
-                // Cast at location: 0x05 (left) or 0x0C (right) = 5 bytes
+                // Cast at location: 0x08 (left hold) or 0x0F (right hold)
+                // arg1=0 matches funmixxed's D2NET_SendPacket(5, 0, packet)
                 BYTE packet[5] = {};
-                packet[0] = left ? 0x05 : 0x0C;
+                packet[0] = left ? 0x08 : 0x0F;
                 *(WORD*)&packet[1] = (WORD)x;
                 *(WORD*)&packet[3] = (WORD)y;
-                D2NET_SendPacket(5, 1, packet);
+                D2NET_SendPacket(5, 0, packet);
+                s_lastCastTime = GetTickCount();
                 json info = {{"status", "cast_at_location"}, {"x", x}, {"y", y},
                              {"skill_side", left ? "left" : "right"}};
                 return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
             }
+        }
+
+        if (name == "attack_unit") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+            int unitId = arguments.value("unit_id", -1);
+            int unitType = arguments.value("unit_type", 1);
+            bool leftClick = arguments.value("left", false);
+
+            if (unitId < 0) {
+                return {{"content", {{{"type", "text"}, {"text", "unit_id required"}}}}, {"isError", true}};
+            }
+
+            UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+            if (!pPlayer) {
+                return {{"content", {{{"type", "text"}, {"text", "No player unit"}}}}, {"isError", true}};
+            }
+
+            // Find the target unit
+            UnitAny* pTarget = D2CLIENT_FindServerSideUnit(unitId, unitType);
+            if (!pTarget) {
+                json info = {{"status", "target_not_found"}, {"unit_id", unitId}};
+                return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}, {"isError", true}};
+            }
+
+            // Build AttackStruct (funmixxed pattern)
+            // dwAttackType: 0xE5 = left click attack, 0x66 = right click attack
+            AttackStruct attack = {};
+            attack.dwAttackType = leftClick ? 0xE5 : 0x66;
+            attack.lpPlayerUnit = pPlayer;
+            attack.lpTargetUnit = pTarget;
+
+            struct UnitPos {
+                static void Get(UnitAny* u, DWORD& x, DWORD& y) {
+                    __try {
+                        if (u->pPath) { x = u->pPath->xPos; y = u->pPath->yPos; }
+                        else if (u->pObjectPath) { x = u->pObjectPath->dwPosX; y = u->pObjectPath->dwPosY; }
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            };
+            UnitPos::Get(pTarget, attack.dwTargetX, attack.dwTargetY);
+
+            // Call D2CLIENT_Attack on the game thread
+            GameCallQueue::PendingCall call = {};
+            call.address = (DWORD)D2CLIENT_Attack;
+            call.args[0] = (DWORD)&attack;
+            call.args[1] = 1; // bAttackingUnit = TRUE
+            call.argCount = 2;
+            call.convention = 0; // stdcall
+            bool ok = GameCallQueue::CallOnGameThread(call, 3000);
+
+            json info = {
+                {"status", ok ? "attacked" : "failed"},
+                {"unit_id", unitId},
+                {"target_x", (int)attack.dwTargetX},
+                {"target_y", (int)attack.dwTargetY},
+                {"attack_type", leftClick ? "left" : "right"}
+            };
+            return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
 
         if (name == "use_waypoint") {
@@ -3619,19 +4050,44 @@ namespace {
             // Check waypoint panel via g_dwData_add0
             bool waypointOpen = (*(DWORD*)0x6FBAADD0) != 0;
 
+            // Check D2 UI vars for standard panels
+            bool cubeOpen = D2CLIENT_GetUIState(UI_CUBE) != 0;
+            bool stashOpen = D2CLIENT_GetUIState(UI_STASH) != 0 || panelState == 0x0C;
+            bool tradeOpen = panelState == 0x0D;
+            // Inventory is visible standalone OR whenever cube/stash/trade is open
+            bool invOpen = D2CLIENT_GetUIState(UI_INVENTORY) != 0
+                        || cubeOpen || stashOpen || tradeOpen;
+            bool charOpen = D2CLIENT_GetUIState(UI_CHARACTER) != 0;
+            bool skillTreeOpen = D2CLIENT_GetUIState(UI_SKILLTREE) != 0;
+            bool questOpen = D2CLIENT_GetUIState(UI_QUEST) != 0;
+            bool chatOpen = D2CLIENT_GetUIState(UI_CHAT_CONSOLE) != 0;
+
+            // Determine primary panel name
             const char* panelName = "none";
             if (waypointOpen) panelName = "waypoint";
-            else if (panelState == 0x0C) panelName = "stash";
+            else if (stashOpen) panelName = "stash";
             else if (panelState == 0x0D) panelName = "trade";
-            else if (panelState == 0x01) panelName = "inventory";
+            else if (cubeOpen) panelName = "cube";
+            else if (invOpen && charOpen) panelName = "inventory+character";
+            else if (invOpen) panelName = "inventory";
+            else if (charOpen) panelName = "character";
+            else if (skillTreeOpen) panelName = "skill_tree";
+            else if (questOpen) panelName = "quest";
+            else if (chatOpen) panelName = "chat";
             else if (panelState > 0) panelName = "other";
 
             json info = {
                 {"panel", panelName},
                 {"panel_state", panelState},
-                {"stash_open", panelState == 0x0C},
+                {"inventory_open", invOpen},
+                {"character_open", charOpen},
+                {"skill_tree_open", skillTreeOpen},
+                {"cube_open", cubeOpen},
+                {"stash_open", stashOpen},
                 {"trade_open", panelState == 0x0D},
-                {"waypoint_open", waypointOpen}
+                {"waypoint_open", waypointOpen},
+                {"quest_open", questOpen},
+                {"chat_open", chatOpen}
             };
             return {{"content", {{{"type", "text"}, {"text", info.dump(2)}}}}};
         }
@@ -3763,7 +4219,7 @@ namespace {
             result["class"] = (classId >= 0 && classId <= 6) ? classNames[classId] : "Unknown";
 
             // Read skills via SEH-safe helper
-            struct SkillEntry { int skillId; int baseLevel; int totalLevel; char tree[32]; };
+            struct SkillEntry { int skillId; int baseLevel; int totalLevel; char tree[32]; char name[64]; bool isPassive; bool isAura; int page; int row; int col; };
             struct SkillReadResult {
                 SkillEntry entries[120];
                 int count;
@@ -3773,13 +4229,37 @@ namespace {
             auto readSkills = [](UnitAny* pUnit, int cls, SkillReadResult& out) {
                 out.count = 0;
                 out.error = false;
-                __try {
+                {
                     Skill* pSkill = pUnit->pInfo->pFirstSkill;
                     while (pSkill && out.count < 120) {
                         if (pSkill->pSkillInfo && pSkill->skillLevel > 0) {
                             auto& e = out.entries[out.count];
                             DWORD sid = pSkill->pSkillInfo->wSkillId;
                             e.skillId = (int)sid;
+                            e.isPassive = (((BYTE*)pSkill->pSkillInfo)[4] & 0x10) != 0;
+                            e.isAura = (((BYTE*)pSkill->pSkillInfo)[4] & 0x20) != 0;
+                            e.name[0] = '\0';
+                            e.page = 0; e.row = 0; e.col = 0;
+
+                            // Get skill name and tree position via data tables
+                            {
+                                int skillDesc = pSkill->pSkillInfo->wSkillDesc;
+                                sgptDataTable* pDataTbl = *p_D2COMMON_sgptDataTable;
+                                if (skillDesc > 0 && pDataTbl && pDataTbl->pSkillDescTxt) {
+                                    SkillDescTxt* pDesc = &pDataTbl->pSkillDescTxt[skillDesc];
+                                    if (pDesc) {
+                                        e.page = pDesc->bSkillPage;
+                                        e.row = pDesc->bSkillRow;
+                                        e.col = pDesc->bSkillColumn;
+                                        if (pDesc->wStrName > 0) {
+                                            wchar_t* wName = GetTblEntryByIndex(pDesc->wStrName, TBLOFFSET_STRING);
+                                            if (wName) {
+                                                WideCharToMultiByte(CP_UTF8, 0, wName, -1, e.name, sizeof(e.name) - 1, nullptr, nullptr);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             e.baseLevel = pSkill->skillLevel;
                             e.totalLevel = D2COMMON_GetSkillLevel(pUnit, pSkill, TRUE);
 
@@ -3818,8 +4298,6 @@ namespace {
                         }
                         pSkill = pSkill->pNextSkill;
                     }
-                } __except(EXCEPTION_EXECUTE_HANDLER) {
-                    out.error = true;
                 }
             };
 
@@ -3834,9 +4312,17 @@ namespace {
                 auto& e = sr.entries[i];
                 json sk;
                 sk["skill_id"] = e.skillId;
+                sk["name"] = e.name[0] ? e.name : "Unknown";
                 sk["base_level"] = e.baseLevel;
                 sk["total_level"] = e.totalLevel;
                 sk["tree"] = e.tree;
+                if (e.isPassive) sk["passive"] = true;
+                if (e.isAura) sk["aura"] = true;
+                if (e.page > 0) {
+                    sk["page"] = e.page;
+                    sk["row"] = e.row;
+                    sk["col"] = e.col;
+                }
                 skillList.push_back(sk);
                 totalPoints += e.baseLevel;
                 treeTotals[e.tree] += e.baseLevel;
@@ -3861,6 +4347,41 @@ namespace {
             result["tree_summary"] = treeSummary;
             result["primary_tree"] = primaryTree;
             result["build_name"] = std::string(result["class"].get<std::string>()) + " (" + primaryTree + ")";
+
+            // Read currently assigned left/right skills
+            auto readAssigned = [&](Skill* pSkill, const char* side) -> json {
+                json sk;
+                sk["side"] = side;
+                {
+                    if (pSkill && pSkill->pSkillInfo) {
+                        sk["skill_id"] = (int)pSkill->pSkillInfo->wSkillId;
+                        sk["base_level"] = (int)pSkill->skillLevel;
+                        sk["total_level"] = (int)D2COMMON_GetSkillLevel(pPlayer, pSkill, TRUE);
+                        sk["charges"] = (int)pSkill->charges;
+                        // Get skill name via data tables
+                        int skillDesc = pSkill->pSkillInfo->wSkillDesc;
+                        sgptDataTable* pDataTbl = *p_D2COMMON_sgptDataTable;
+                        if (skillDesc > 0 && pDataTbl && pDataTbl->pSkillDescTxt) {
+                            SkillDescTxt* pDesc = &pDataTbl->pSkillDescTxt[skillDesc];
+                            if (pDesc && pDesc->wStrName > 0) {
+                                wchar_t* wName = GetTblEntryByIndex(pDesc->wStrName, TBLOFFSET_STRING);
+                                if (wName) {
+                                    char name[64] = {};
+                                    WideCharToMultiByte(CP_UTF8, 0, wName, -1, name, sizeof(name) - 1, nullptr, nullptr);
+                                    sk["name"] = name;
+                                }
+                            }
+                        }
+                    } else {
+                        sk["skill_id"] = -1;
+                        sk["name"] = "None";
+                    }
+                }
+                return sk;
+            };
+
+            result["left_skill"] = readAssigned(pPlayer->pInfo->pLeftSkill, "left");
+            result["right_skill"] = readAssigned(pPlayer->pInfo->pRightSkill, "right");
 
             return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
@@ -4355,6 +4876,95 @@ namespace {
             return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
         }
 
+        if (name == "reveal_map") {
+            if (!GameState::IsGameReady()) {
+                return {{"content", {{{"type", "text"}, {"text", "Not in game"}}}}, {"isError", true}};
+            }
+
+            struct RevealWorker {
+                struct RevealResult {
+                    int roomsRevealed;
+                    int roomsTotal;
+                    DWORD levelNo;
+                    bool error;
+                };
+
+                static DWORD __cdecl DoReveal(DWORD pResultArg) {
+                    RevealResult* out = (RevealResult*)pResultArg;
+                    out->error = true;
+                    out->roomsRevealed = 0;
+                    out->roomsTotal = 0;
+                    out->levelNo = 0;
+                    __try {
+                        UnitAny* pPlayer = D2CLIENT_GetPlayerUnit();
+                        if (!pPlayer || !pPlayer->pPath || !pPlayer->pPath->pRoom1 ||
+                            !pPlayer->pPath->pRoom1->pRoom2 || !pPlayer->pPath->pRoom1->pRoom2->pLevel)
+                            return 0;
+
+                        Level* pLevel = pPlayer->pPath->pRoom1->pRoom2->pLevel;
+                        out->levelNo = pLevel->dwLevelNo;
+
+                        // Init level rooms if not loaded
+                        if (!pLevel->pRoom2First) {
+                            D2COMMON_InitLevel(pLevel);
+                        }
+                        if (!pLevel->pRoom2First) return 0;
+
+                        // Init automap layer for this level
+                        D2CLIENT_InitAutomapLayer(pLevel->dwLevelNo);
+                        if (!*p_D2CLIENT_AutomapLayer) return 0;
+
+                        // Reveal each room
+                        for (Room2* pRoom2 = pLevel->pRoom2First; pRoom2; pRoom2 = pRoom2->pRoom2Next) {
+                            out->roomsTotal++;
+                            bool addedRoom = false;
+
+                            if (!pRoom2->pRoom1) {
+                                D2COMMON_AddRoomData(pPlayer->pAct, pLevel->dwLevelNo,
+                                    pRoom2->dwPosX, pRoom2->dwPosY, pPlayer->pPath->pRoom1);
+                                addedRoom = true;
+                            }
+
+                            if (pRoom2->pRoom1) {
+                                D2CLIENT_RevealAutomapRoom(pRoom2->pRoom1, 1, *p_D2CLIENT_AutomapLayer);
+                                out->roomsRevealed++;
+                            }
+
+                            if (addedRoom) {
+                                D2COMMON_RemoveRoomData(pPlayer->pAct, pLevel->dwLevelNo,
+                                    pRoom2->dwPosX, pRoom2->dwPosY, pPlayer->pPath->pRoom1);
+                            }
+                        }
+
+                        out->error = false;
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                    return 0;
+                }
+            };
+
+            // Must run on game thread
+            RevealWorker::RevealResult revResult;
+            GameCallQueue::PendingCall call = {};
+            call.address = (DWORD)&RevealWorker::DoReveal;
+            call.args[0] = (DWORD)&revResult;
+            call.argCount = 1;
+            call.convention = 1; // cdecl
+
+            bool ok = GameCallQueue::CallOnGameThread(call, 5000);
+
+            if (!ok || revResult.error) {
+                return {{"content", {{{"type", "text"}, {"text", "Failed to reveal map"}}}}, {"isError", true}};
+            }
+
+            json result = {
+                {"status", "revealed"},
+                {"level", revResult.levelNo},
+                {"rooms_revealed", revResult.roomsRevealed},
+                {"rooms_total", revResult.roomsTotal}
+            };
+            return {{"content", {{{"type", "text"}, {"text", result.dump(2)}}}}};
+        }
+
         return {
             {"content", {{
                 {"type", "text"},
@@ -4435,11 +5045,18 @@ namespace {
         // Create server (re-created on each restart)
         g_server = new httplib::Server();
 
-        // CORS headers for browser/tool access
+        // Prevent connection exhaustion: disable keep-alive, limit connections
+        g_server->set_keep_alive_max_count(1);
+        g_server->set_keep_alive_timeout(1);
+        g_server->set_read_timeout(10, 0);
+        g_server->set_write_timeout(10, 0);
+
+        // CORS headers + force connection close
         g_server->set_default_headers({
             {"Access-Control-Allow-Origin", "*"},
             {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
-            {"Access-Control-Allow-Headers", "Content-Type"}
+            {"Access-Control-Allow-Headers", "Content-Type"},
+            {"Connection", "close"}
         });
 
         // OPTIONS preflight
